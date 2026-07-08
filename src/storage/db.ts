@@ -72,5 +72,27 @@ function migrate(db: Db) {
       added_at_ms INTEGER NOT NULL,
       PRIMARY KEY (member_id, user_id)
     );
+
+    -- Free-form per-portal key/value config, e.g. which Bitrix24 "Списки" (universal list)
+    -- iblock feeds the canonical city directory.
+    CREATE TABLE IF NOT EXISTS app_settings (
+      member_id TEXT NOT NULL,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL,
+      updated_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (member_id, key)
+    );
+
+    -- Mirror of city names pulled from the portal's own Bitrix24 "Списки" (Универсальные списки),
+    -- so the promo catalog's city picker matches the company's single source of truth for cities
+    -- instead of free-typed strings.
+    CREATE TABLE IF NOT EXISTS city_directory (
+      member_id TEXT NOT NULL,
+      external_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      sort INTEGER NOT NULL DEFAULT 0,
+      updated_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (member_id, external_id)
+    );
   `);
 }

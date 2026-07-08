@@ -21,20 +21,29 @@ function isDuplicateOk(res: { ok: true } | { ok: false; error: string; errorDesc
   return String(res.errorDescription ?? "").toLowerCase().includes("already binded");
 }
 
-async function ensureUserFieldType(
+function placementBindMethod(): string {
+  return "placement.bind";
+}
+
+/**
+ * Shows the promo picker as a tab on the deal/lead detail card (`placement.bind`).
+ * We deliberately don't use a custom USERFIELD_TYPE widget: registering a brand-new field
+ * TYPE (`userfieldtype.add`) needs a higher-privilege scope than plain field/placement
+ * registration and was rejected (`insufficient_scope`) on this portal even with `crm`+`user`.
+ */
+async function ensurePlacement(
   db: Db,
-  params: { domain: string; memberId: string; accessToken: string; handlerUrl: string },
+  params: { domain: string; memberId: string; accessToken: string; placement: string; handlerUrl: string },
 ) {
   return callB24<unknown>(db, {
     domain: params.domain,
     memberId: params.memberId,
     accessToken: params.accessToken,
-    method: "userfieldtype.add",
+    method: placementBindMethod(),
     body: {
-      USER_TYPE_ID: "promo_selector",
+      PLACEMENT: params.placement,
       HANDLER: params.handlerUrl,
-      TITLE: "Выбор акции",
-      DESCRIPTION: "Виджет выбора акций (зависимые списки: направление → тип → акция)",
+      TITLE: "Акции",
     },
   });
 }
@@ -76,15 +85,25 @@ export async function setupPromoFields(
     types: string[];
   },
 ): Promise<{ ok: true } | { ok: false; error: string; errorDescription?: string }> {
-  const handlerUrl = `${params.publicBaseUrl.replace(/\/+$/, "")}/b24/userfield/promo`;
+  const handlerUrl = `${params.publicBaseUrl.replace(/\/+$/, "")}/b24/promo-tab`;
 
-  const addType = await ensureUserFieldType(db, {
+  const dealTab = await ensurePlacement(db, {
     domain: params.domain,
     memberId: params.memberId,
     accessToken: params.accessToken,
+    placement: "CRM_DEAL_DETAIL_TAB",
     handlerUrl,
   });
-  if (!isDuplicateOk(addType)) return addType;
+  if (!isDuplicateOk(dealTab)) return dealTab;
+
+  const leadTab = await ensurePlacement(db, {
+    domain: params.domain,
+    memberId: params.memberId,
+    accessToken: params.accessToken,
+    placement: "CRM_LEAD_DETAIL_TAB",
+    handlerUrl,
+  });
+  if (!isDuplicateOk(leadTab)) return leadTab;
 
   // Bitrix uses the same UF_CRM_ namespace for every CRM entity, so one set of short field
   // names produces identical field codes on both the deal and the lead.
@@ -96,25 +115,26 @@ export async function setupPromoFields(
   const nameShort = codes.nameField.replace(/^UF_CRM_/, "");
 
   for (const entity of ["deal", "lead"] as const) {
-    // 1) The dependent-select widget itself: stores the full JSON snapshot for audit/history.
-    const widgetRes = await ensureField(db, {
+    // 1) Plain (non-custom-type) string field: stores the full JSON snapshot for audit/history.
+    //    Edited only through our own "Акции" tab (placement above), not inline on the card.
+    const jsonRes = await ensureField(db, {
       domain: params.domain,
       memberId: params.memberId,
       accessToken: params.accessToken,
       entity,
       fields: {
-        USER_TYPE_ID: "promo_selector",
+        USER_TYPE_ID: "string",
         FIELD_NAME: shortJsonName,
         XML_ID: shortJsonName,
         MANDATORY: "N",
         SHOW_IN_LIST: "N",
         EDIT_IN_LIST: "N",
-        EDIT_FORM_LABEL: "Выбор акции",
-        LIST_COLUMN_LABEL: "Выбор акции",
+        EDIT_FORM_LABEL: "Выбор акции (JSON)",
+        LIST_COLUMN_LABEL: "Выбор акции (JSON)",
         SETTINGS: {},
       },
     });
-    if (!isDuplicateOk(widgetRes)) return widgetRes;
+    if (!isDuplicateOk(jsonRes)) return jsonRes;
 
     // 2) Plain enumeration fields (multiple) so standard CRM reports/filters/analytics can use them.
     const cityRes = await ensureField(db, {

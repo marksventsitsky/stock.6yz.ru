@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "stock-dev",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["dist/server.js"],
+      "port": 8788,
+      "env": {
+        "PORT": "8788",
+        "DB_PATH": "/tmp/stock_dev.sqlite",
+        "PUBLIC_BASE_URL": "http://localhost:8788",
+        "ADMIN_SECRET": "devsecret"
+      }
+    }
+  ]
+}

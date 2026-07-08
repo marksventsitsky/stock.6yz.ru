@@ -20,33 +20,20 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <script src="//api.bitrix24.com/api/v1/dev/"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
     <title>Акции — админка</title>
     <style>
-      :root { color-scheme: light; }
-      body { margin:0; font: 13px/1.4 -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Arial,sans-serif; background:#fafafa; color:#111827; }
-      .wrap { padding: 16px; max-width: 1400px; margin: 0 auto; }
-      h1 { font-size:18px; margin: 0 0 12px 0; }
-      .bar { display:flex; gap:8px; align-items:center; margin-bottom:12px; flex-wrap:wrap; }
-      .bar .spacer { flex:1; }
-      button { border: 1px solid #d1d5db; background:#fff; border-radius:8px; padding:6px 10px; cursor:pointer; }
-      button.primary { background:#2563eb; border-color:#2563eb; color:#fff; }
-      button.danger { background:#dc2626; border-color:#dc2626; color:#fff; }
-      button:disabled { opacity:.6; cursor:not-allowed; }
-      table { width:100%; border-collapse: collapse; background:#fff; }
-      th, td { padding: 6px 8px; border-bottom: 1px solid #e5e7eb; vertical-align: top; font-size:12px; }
-      th { text-align:left; color:#374151; background:#f3f4f6; position:sticky; top:0; }
-      input[type="text"], input[type="date"], textarea { width:100%; border:1px solid #d1d5db; border-radius:6px; padding:4px 6px; font: inherit; box-sizing:border-box; }
-      textarea { resize: vertical; min-height: 34px; }
-      input[type="checkbox"] { width:16px; height:16px; }
-      .muted { color:#6b7280; font-size:12px; }
-      .error { color:#b91c1c; }
-      .ok { color:#166534; }
-      .row-actions { display:flex; gap:4px; }
-      .badge { display:inline-block; padding:2px 6px; border-radius:6px; background:#eef2ff; color:#3730a3; font-size:11px; }
+      body { background: #f8fafc; }
+      ::-webkit-scrollbar { width: 8px; height: 8px; }
+      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+      table.catalog input[type="text"], table.catalog textarea, table.catalog input[type="date"], table.catalog select {
+        width: 100%; border: 1px solid #e2e8f0; border-radius: 6px; padding: 3px 6px; font: inherit; box-sizing: border-box; background: #fff;
+      }
+      table.catalog textarea { resize: vertical; min-height: 32px; }
     </style>
   </head>
-  <body>
-    <div class="wrap"><div id="app">Загрузка…</div></div>
+  <body class="text-sm text-slate-800">
+    <div class="max-w-[1500px] mx-auto p-5"><div id="app">Загрузка…</div></div>
     <script id="bootstrap-json" type="application/json">${bootstrapJson}</script>
     <script>
       (function () {
@@ -60,7 +47,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
             .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
         }
         function showFatal(title, detail) {
-          appEl.innerHTML = '<div class="error"><b>' + escapeHtml(title) + '</b><pre style="white-space:pre-wrap;">' + escapeHtml(String(detail)) + '</pre></div>';
+          appEl.innerHTML = '<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-red-700"><b>' + escapeHtml(title) + '</b><pre class="whitespace-pre-wrap mt-2 text-xs">' + escapeHtml(String(detail)) + '</pre></div>';
         }
         window.addEventListener("error", (ev) => { try { showFatal("JS error", (ev.error && ev.error.stack) || String(ev.message || ev)); } catch {} });
         window.addEventListener("unhandledrejection", (ev) => { try { showFatal("Unhandled rejection", (ev.reason && ev.reason.stack) || String(ev.reason)); } catch {} });
@@ -86,7 +73,10 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
         let isPortalAdmin = false;
         let accessUsers = [];
         let userSearchResults = [];
+        let cityConfig = { iblockTypeId: null, iblockId: null, entries: [] };
+        let discoveredLists = [];
         let statusText = "", statusKind = "";
+        let tab = "catalog"; // catalog | access | cities
 
         function setStatus(kind, text) { statusKind = kind; statusText = text || ""; render(); }
 
@@ -101,6 +91,13 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           return data;
         }
 
+        function cityOptions() {
+          if (cityConfig.entries && cityConfig.entries.length) return cityConfig.entries.map((e) => e.name);
+          const set = new Set();
+          catalog.forEach((p) => (p.cities || []).forEach((c) => { if (c !== "Все") set.add(c); }));
+          return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
+        }
+
         async function loadAll() {
           setStatus("muted", "Загрузка…");
           const a = auth();
@@ -113,50 +110,12 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
             if (isPortalAdmin) {
               const acc = await api("/api/admin/access/list", { method: "POST", body: a });
               accessUsers = acc.items || [];
+              const cfg = await api("/api/admin/citylist/config", { method: "POST", body: a });
+              cityConfig = { iblockTypeId: cfg.iblockTypeId, iblockId: cfg.iblockId, entries: cfg.entries || [] };
             }
             setStatus("", "");
           } catch (e) {
             setStatus("error", "Ошибка загрузки: " + (e && e.message ? e.message : String(e)));
-          }
-        }
-
-        let accessQuery = "";
-
-        async function searchUsers() {
-          const a = auth();
-          try {
-            const res = await api("/api/admin/access/search", { method: "POST", body: { ...a, query: accessQuery } });
-            userSearchResults = res.users || [];
-            render();
-          } catch (e) {
-            setStatus("error", "Ошибка поиска: " + (e && e.message ? e.message : String(e)));
-          }
-        }
-
-        async function addAccessUser(userId, name) {
-          const a = auth();
-          setStatus("muted", "Добавление доступа…");
-          try {
-            await api("/api/admin/access/add", { method: "POST", body: { ...a, userId, name } });
-            userSearchResults = [];
-            accessQuery = "";
-            setStatus("ok", "Доступ выдан");
-            await loadAll();
-          } catch (e) {
-            setStatus("error", "Ошибка: " + (e && e.message ? e.message : String(e)));
-          }
-        }
-
-        async function removeAccessUser(userId) {
-          if (!confirm("Забрать доступ у этого пользователя?")) return;
-          const a = auth();
-          setStatus("muted", "Удаление доступа…");
-          try {
-            await api("/api/admin/access/remove", { method: "POST", body: { ...a, userId } });
-            setStatus("ok", "Доступ отозван");
-            await loadAll();
-          } catch (e) {
-            setStatus("error", "Ошибка: " + (e && e.message ? e.message : String(e)));
           }
         }
 
@@ -171,7 +130,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
             const payload = { ...a, promotion: {
               id: row.id && row.id.trim() ? row.id.trim() : "promo-" + Date.now().toString(36),
               brand: row.brand || "",
-              cities: (row.citiesText || (row.cities || []).join(", ")).split(",").map((s) => s.trim()).filter(Boolean),
+              cities: row.cities || [],
               type: row.type || "",
               title: row.title || "",
               description: row.description || "",
@@ -214,89 +173,177 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           }
         }
 
+        let accessQuery = "";
+        async function searchUsers() {
+          const a = auth();
+          try {
+            const res = await api("/api/admin/access/search", { method: "POST", body: { ...a, query: accessQuery } });
+            userSearchResults = res.users || [];
+            render();
+          } catch (e) { setStatus("error", "Ошибка поиска: " + (e && e.message ? e.message : String(e))); }
+        }
+        async function addAccessUser(userId, name) {
+          const a = auth();
+          setStatus("muted", "Добавление доступа…");
+          try {
+            await api("/api/admin/access/add", { method: "POST", body: { ...a, userId, name } });
+            userSearchResults = []; accessQuery = "";
+            setStatus("ok", "Доступ выдан");
+            await loadAll();
+          } catch (e) { setStatus("error", "Ошибка: " + (e && e.message ? e.message : String(e))); }
+        }
+        async function removeAccessUser(userId) {
+          if (!confirm("Забрать доступ у этого пользователя?")) return;
+          const a = auth();
+          setStatus("muted", "Удаление доступа…");
+          try {
+            await api("/api/admin/access/remove", { method: "POST", body: { ...a, userId } });
+            setStatus("ok", "Доступ отозван");
+            await loadAll();
+          } catch (e) { setStatus("error", "Ошибка: " + (e && e.message ? e.message : String(e))); }
+        }
+
+        async function discoverCityLists() {
+          const a = auth();
+          setStatus("muted", "Ищу списки в Битрикс24…");
+          try {
+            const res = await api("/api/admin/citylist/discover", { method: "POST", body: a });
+            discoveredLists = res.lists || [];
+            setStatus("", discoveredLists.length ? "" : "Списки не найдены (проверьте scope 'lists' у приложения)");
+            render();
+          } catch (e) { setStatus("error", "Ошибка поиска списков: " + (e && e.message ? e.message : String(e))); }
+        }
+        async function syncCityList(iblockTypeId, iblockId) {
+          const a = auth();
+          setStatus("muted", "Синхронизирую города…");
+          try {
+            const res = await api("/api/admin/citylist/sync", { method: "POST", body: { ...a, iblockTypeId, iblockId } });
+            setStatus("ok", "Загружено городов: " + res.count);
+            await loadAll();
+          } catch (e) { setStatus("error", "Ошибка синхронизации: " + (e && e.message ? e.message : String(e))); }
+        }
+
         let draftNewRow = null;
 
+        function tabBtn(key, label) {
+          const activeCls = tab === key ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50";
+          return '<button type="button" data-tab="' + key + '" class="tab-btn px-3 py-1.5 rounded-lg text-sm font-medium border border-slate-200 ' + activeCls + '">' + label + '</button>';
+        }
+
         function render() {
-          const statusHtml = statusText ? '<div class="' + (statusKind === "error" ? "error" : statusKind === "ok" ? "ok" : "muted") + '">' + escapeHtml(statusText) + "</div>" : "";
+          const statusHtml = statusText
+            ? '<div class="mb-3 text-sm ' + (statusKind === "error" ? "text-red-600" : statusKind === "ok" ? "text-emerald-600" : "text-slate-500") + '">' + escapeHtml(statusText) + "</div>"
+            : "";
 
           if (!isAdmin) {
-            appEl.innerHTML = '<h1>Акции — админка</h1><div class="error">У вас нет доступа к этому разделу. Обратитесь к администратору портала, чтобы он выдал вам доступ.</div>' + statusHtml;
+            appEl.innerHTML = '<h1 class="text-lg font-semibold mb-3">Акции — админка</h1><div class="rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">У вас нет доступа к этому разделу. Обратитесь к администратору портала, чтобы он выдал вам доступ.</div>' + statusHtml;
             return;
           }
 
-          const rows = draftNewRow ? catalog.concat([draftNewRow]) : catalog;
+          const tabsHtml = isPortalAdmin
+            ? '<div class="flex gap-2 mb-4">' + tabBtn("catalog", "Каталог акций") + tabBtn("access", "Доступ") + tabBtn("cities", "Города") + '</div>'
+            : "";
 
-          const accessHtml = isPortalAdmin ? \`
-            <div class="panel" style="border:1px solid #e5e7eb;border-radius:10px;padding:10px;margin-bottom:12px;background:#fff;">
-              <h3 style="margin:0 0 8px 0;font-size:13px;">Доступ к админке (кроме администраторов портала)</h3>
-              <div class="bar">
-                <input type="text" id="accessQuery" placeholder="Имя или email сотрудника…" style="max-width:260px;" value="\${escapeHtml(accessQuery)}"/>
-                <button id="accessSearchBtn" type="button">Найти</button>
-              </div>
-              \${userSearchResults.length ? '<div class="muted" style="margin:6px 0;">Результаты поиска:</div><div class="bar">' +
-                userSearchResults.map((u) => '<button type="button" class="add-access-btn" data-uid="' + u.userId + '" data-name="' + escapeHtml(u.name) + '">+ ' + escapeHtml(u.name) + '</button>').join("") +
-                '</div>' : ""}
-              <table style="margin-top:8px;">
-                <thead><tr><th>Пользователь</th><th style="width:80px;">ID</th><th style="width:60px;"></th></tr></thead>
-                <tbody>
-                  \${accessUsers.length ? accessUsers.map((u) => \`
-                    <tr><td>\${escapeHtml(u.name)}</td><td>\${u.userId}</td><td><button type="button" class="danger remove-access-btn" data-uid="\${u.userId}">✕</button></td></tr>
-                  \`).join("") : '<tr><td colspan="3" class="muted">Пока никому, кроме админов портала, доступ не выдан.</td></tr>'}
-                </tbody>
-              </table>
-            </div>\` : "";
+          let bodyHtml = "";
+          if (tab === "access" && isPortalAdmin) bodyHtml = accessTabHtml();
+          else if (tab === "cities" && isPortalAdmin) bodyHtml = citiesTabHtml();
+          else bodyHtml = catalogTabHtml();
 
           appEl.innerHTML = \`
-            <h1>Каталог акций <span class="badge">\${catalog.length}</span></h1>
-            \${accessHtml}
-            <div class="bar">
-              <button id="addRowBtn" class="primary" type="button">+ Добавить акцию</button>
-              <button id="resyncBtn" type="button">Синхронизировать справочники в Bitrix</button>
-              <div class="spacer"></div>
-              <div class="muted">Изменения тут пишутся в JSON-снапшот и в обычные поля направления/бренда/типа/названия акции на лидах и сделках.</div>
+            <div class="flex items-center justify-between mb-1">
+              <h1 class="text-lg font-semibold text-slate-900">Акции <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">\${catalog.length}</span></h1>
             </div>
+            <p class="text-xs text-slate-400 mb-4">Изменения пишутся в JSON-снапшот и в обычные поля направления/бренда/типа/названия акции на лидах и сделках.</p>
+            \${tabsHtml}
             \${statusHtml}
-            <table>
-              <thead><tr>
-                <th style="width:110px;">ID</th>
-                <th style="width:110px;">Бренд</th>
-                <th style="width:160px;">Города (через запятую, "Все" = все)</th>
-                <th style="width:140px;">Тип</th>
-                <th style="width:220px;">Название</th>
-                <th>Описание</th>
-                <th style="width:110px;">C</th>
-                <th style="width:110px;">По</th>
-                <th style="width:140px;">Размещения</th>
-                <th style="width:110px;">Отдел</th>
-                <th style="width:50px;">Вкл</th>
-                <th style="width:90px;"></th>
-              </tr></thead>
-              <tbody>
-                \${rows.map((r, i) => rowHtml(r, i)).join("")}
-              </tbody>
-            </table>
+            \${bodyHtml}
           \`;
 
-          document.getElementById("addRowBtn").addEventListener("click", () => { draftNewRow = blankRow(); render(); });
+          appEl.querySelectorAll(".tab-btn").forEach((el) => el.addEventListener("click", (e) => { tab = e.currentTarget.getAttribute("data-tab"); render(); }));
+          wireCatalogTab();
+          wireAccessTab();
+          wireCitiesTab();
+        }
+
+        function catalogTabHtml() {
+          const rows = draftNewRow ? catalog.concat([draftNewRow]) : catalog;
+          return \`
+            <div class="flex gap-2 mb-3">
+              <button id="addRowBtn" type="button" class="inline-flex items-center rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700">+ Добавить акцию</button>
+              <button id="resyncBtn" type="button" class="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Синхронизировать справочники в Bitrix</button>
+            </div>
+            <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
+              <table class="catalog w-full text-xs border-collapse">
+                <thead>
+                  <tr class="bg-slate-50 text-slate-500 text-left">
+                    <th class="p-2 w-24">ID</th>
+                    <th class="p-2 w-24">Бренд</th>
+                    <th class="p-2 w-40">Города</th>
+                    <th class="p-2 w-32">Тип</th>
+                    <th class="p-2 w-52">Название</th>
+                    <th class="p-2">Описание</th>
+                    <th class="p-2 w-28">С</th>
+                    <th class="p-2 w-28">По</th>
+                    <th class="p-2 w-32">Размещения</th>
+                    <th class="p-2 w-24">Отдел</th>
+                    <th class="p-2 w-12">Вкл</th>
+                    <th class="p-2 w-20"></th>
+                  </tr>
+                </thead>
+                <tbody>\${rows.map((r, i) => rowHtml(r, i)).join("")}</tbody>
+              </table>
+            </div>
+          \`;
+        }
+
+        function rowHtml(r, i) {
+          const prefix = "row" + i + "_";
+          const idField = r.__new
+            ? '<input type="text" id="' + prefix + 'id" placeholder="авто" value="' + escapeHtml(r.id || "") + '"/>'
+            : '<span class="text-slate-400">' + escapeHtml(r.id) + '</span>';
+          const cities = cityOptions();
+          const citySelected = new Set(r.cities || []);
+          const cityOptsHtml = ['Все'].concat(cities).map((c) =>
+            '<option value="' + escapeHtml(c) + '" ' + (citySelected.has(c) ? "selected" : "") + '>' + escapeHtml(c) + '</option>'
+          ).join("");
+          return \`
+            <tr class="border-t border-slate-100 hover:bg-slate-50/60 align-top">
+              <td class="p-2">\${idField}</td>
+              <td class="p-2"><input type="text" id="\${prefix}brand" value="\${escapeHtml(r.brand || "")}"/></td>
+              <td class="p-2"><select id="\${prefix}cities" multiple size="3">\${cityOptsHtml}</select></td>
+              <td class="p-2"><input type="text" id="\${prefix}type" value="\${escapeHtml(r.type || "")}"/></td>
+              <td class="p-2"><textarea id="\${prefix}title">\${escapeHtml(r.title || "")}</textarea></td>
+              <td class="p-2"><textarea id="\${prefix}description">\${escapeHtml(r.description || "")}</textarea></td>
+              <td class="p-2"><input type="date" id="\${prefix}periodStart" value="\${escapeHtml(r.periodStart || "")}"/></td>
+              <td class="p-2"><input type="date" id="\${prefix}periodEnd" value="\${escapeHtml(r.periodEnd || "")}"/></td>
+              <td class="p-2"><input type="text" id="\${prefix}placementsText" value="\${escapeHtml((r.placements || []).join(", "))}"/></td>
+              <td class="p-2"><input type="text" id="\${prefix}department" value="\${escapeHtml(r.department || "")}"/></td>
+              <td class="p-2 text-center"><input type="checkbox" id="\${prefix}active" \${r.active ? "checked" : ""}/></td>
+              <td class="p-2">
+                <div class="flex gap-1">
+                  <button id="\${prefix}save" type="button" class="rounded-md bg-indigo-600 text-white px-2 py-1 hover:bg-indigo-700">💾</button>
+                  \${r.__new ? "" : '<button id="' + prefix + 'del" type="button" class="rounded-md bg-red-600 text-white px-2 py-1 hover:bg-red-700">✕</button>'}
+                </div>
+              </td>
+            </tr>\`;
+        }
+
+        function wireCatalogTab() {
+          const rows = draftNewRow ? catalog.concat([draftNewRow]) : catalog;
+          const addRowBtn = document.getElementById("addRowBtn");
+          if (addRowBtn) addRowBtn.addEventListener("click", () => { draftNewRow = blankRow(); render(); });
           const resyncBtn = document.getElementById("resyncBtn");
           if (resyncBtn) resyncBtn.addEventListener("click", resyncFields);
 
-          const accessQueryEl = document.getElementById("accessQuery");
-          if (accessQueryEl) accessQueryEl.addEventListener("change", (e) => { accessQuery = e.target.value; });
-          const accessSearchBtn = document.getElementById("accessSearchBtn");
-          if (accessSearchBtn) accessSearchBtn.addEventListener("click", searchUsers);
-          appEl.querySelectorAll(".add-access-btn").forEach((el) => {
-            el.addEventListener("click", (e) => addAccessUser(Number(e.target.getAttribute("data-uid")), e.target.getAttribute("data-name")));
-          });
-          appEl.querySelectorAll(".remove-access-btn").forEach((el) => {
-            el.addEventListener("click", (e) => removeAccessUser(Number(e.target.getAttribute("data-uid"))));
-          });
-
           rows.forEach((r, i) => {
             const prefix = "row" + i + "_";
-            ["id","brand","citiesText","type","title","description","periodStart","periodEnd","placementsText","department"].forEach((k) => {
+            ["id","brand","type","title","description","periodStart","periodEnd","placementsText","department"].forEach((k) => {
               const el = document.getElementById(prefix + k);
               if (el) el.addEventListener("change", (e) => { r[k] = e.target.value; });
+            });
+            const citiesEl = document.getElementById(prefix + "cities");
+            if (citiesEl) citiesEl.addEventListener("change", (e) => {
+              r.cities = Array.from(e.target.selectedOptions).map((o) => o.value);
             });
             const active = document.getElementById(prefix + "active");
             if (active) active.addEventListener("change", (e) => { r.active = e.target.checked; });
@@ -307,29 +354,62 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           });
         }
 
-        function rowHtml(r, i) {
-          const prefix = "row" + i + "_";
-          const idField = r.__new
-            ? '<input type="text" id="' + prefix + 'id" placeholder="авто" value="' + escapeHtml(r.id || "") + '"/>'
-            : escapeHtml(r.id);
+        function accessTabHtml() {
           return \`
-            <tr>
-              <td>\${idField}</td>
-              <td><input type="text" id="\${prefix}brand" value="\${escapeHtml(r.brand || "")}"/></td>
-              <td><input type="text" id="\${prefix}citiesText" value="\${escapeHtml((r.cities || []).join(", "))}"/></td>
-              <td><input type="text" id="\${prefix}type" value="\${escapeHtml(r.type || "")}"/></td>
-              <td><textarea id="\${prefix}title">\${escapeHtml(r.title || "")}</textarea></td>
-              <td><textarea id="\${prefix}description">\${escapeHtml(r.description || "")}</textarea></td>
-              <td><input type="date" id="\${prefix}periodStart" value="\${escapeHtml(r.periodStart || "")}"/></td>
-              <td><input type="date" id="\${prefix}periodEnd" value="\${escapeHtml(r.periodEnd || "")}"/></td>
-              <td><input type="text" id="\${prefix}placementsText" value="\${escapeHtml((r.placements || []).join(", "))}"/></td>
-              <td><input type="text" id="\${prefix}department" value="\${escapeHtml(r.department || "")}"/></td>
-              <td style="text-align:center;"><input type="checkbox" id="\${prefix}active" \${r.active ? "checked" : ""}/></td>
-              <td class="row-actions">
-                <button id="\${prefix}save" class="primary" type="button">💾</button>
-                \${r.__new ? "" : '<button id="' + prefix + 'del" class="danger" type="button">✕</button>'}
-              </td>
-            </tr>\`;
+            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm max-w-xl">
+              <h3 class="text-sm font-semibold text-slate-800 mb-1">Доступ к админке (кроме администраторов портала)</h3>
+              <p class="text-xs text-slate-400 mb-3">Выдайте доступ конкретному сотруднику, не делая его полным администратором портала Bitrix24.</p>
+              <div class="flex gap-2 mb-3">
+                <input type="text" id="accessQuery" placeholder="Имя или email сотрудника…" value="\${escapeHtml(accessQuery)}"
+                  class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"/>
+                <button id="accessSearchBtn" type="button" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50">Найти</button>
+              </div>
+              \${userSearchResults.length ? '<div class="flex flex-wrap gap-2 mb-3">' +
+                userSearchResults.map((u) => '<button type="button" class="add-access-btn rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 px-2 py-1 text-xs font-medium hover:bg-emerald-100" data-uid="' + u.userId + '" data-name="' + escapeHtml(u.name) + '">+ ' + escapeHtml(u.name) + '</button>').join("") +
+                '</div>' : ""}
+              <table class="w-full text-xs">
+                <thead><tr class="text-left text-slate-500"><th class="py-1">Пользователь</th><th class="py-1 w-20">ID</th><th class="py-1 w-12"></th></tr></thead>
+                <tbody>
+                  \${accessUsers.length ? accessUsers.map((u) => \`
+                    <tr class="border-t border-slate-100"><td class="py-1.5">\${escapeHtml(u.name)}</td><td class="py-1.5">\${u.userId}</td>
+                      <td class="py-1.5"><button type="button" class="remove-access-btn rounded-md bg-red-600 text-white px-2 py-0.5" data-uid="\${u.userId}">✕</button></td></tr>
+                  \`).join("") : '<tr><td colspan="3" class="py-2 text-slate-400">Пока никому, кроме админов портала, доступ не выдан.</td></tr>'}
+                </tbody>
+              </table>
+            </div>\`;
+        }
+
+        function wireAccessTab() {
+          const accessQueryEl = document.getElementById("accessQuery");
+          if (accessQueryEl) accessQueryEl.addEventListener("change", (e) => { accessQuery = e.target.value; });
+          const accessSearchBtn = document.getElementById("accessSearchBtn");
+          if (accessSearchBtn) accessSearchBtn.addEventListener("click", searchUsers);
+          appEl.querySelectorAll(".add-access-btn").forEach((el) => el.addEventListener("click", (e) => addAccessUser(Number(e.currentTarget.getAttribute("data-uid")), e.currentTarget.getAttribute("data-name"))));
+          appEl.querySelectorAll(".remove-access-btn").forEach((el) => el.addEventListener("click", (e) => removeAccessUser(Number(e.currentTarget.getAttribute("data-uid")))));
+        }
+
+        function citiesTabHtml() {
+          const configured = cityConfig.iblockId ? \`Источник: IBLOCK_TYPE_ID=\${escapeHtml(cityConfig.iblockTypeId)}, IBLOCK_ID=\${escapeHtml(cityConfig.iblockId)} · загружено городов: \${cityConfig.entries.length}\` : "Источник ещё не выбран — города берутся из уже введённых в акциях значений.";
+          return \`
+            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm max-w-2xl">
+              <h3 class="text-sm font-semibold text-slate-800 mb-1">Города из Bitrix24 «Списки»</h3>
+              <p class="text-xs text-slate-400 mb-3">\${configured}</p>
+              <button id="discoverBtn" type="button" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50 mb-3">Найти списки в Битрикс24</button>
+              \${discoveredLists.length ? '<div class="space-y-1.5 mb-3">' + discoveredLists.map((l) =>
+                '<div class="flex items-center justify-between rounded-lg border border-slate-200 p-2 text-xs">' +
+                  '<div>' + escapeHtml(l.NAME) + ' <span class="text-slate-400">(type=' + escapeHtml(l.IBLOCK_TYPE_ID) + ', id=' + escapeHtml(l.IBLOCK_ID) + ')</span></div>' +
+                  '<button type="button" class="sync-list-btn rounded-md bg-indigo-600 text-white px-2 py-1" data-type="' + escapeHtml(l.IBLOCK_TYPE_ID) + '" data-id="' + escapeHtml(l.IBLOCK_ID) + '">Использовать этот</button>' +
+                '</div>').join("") + '</div>' : ""}
+              \${cityConfig.entries.length ? '<div class="flex flex-wrap gap-1.5">' + cityConfig.entries.slice(0, 40).map((e) =>
+                '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">' + escapeHtml(e.name) + '</span>').join("") + '</div>' : ""}
+            </div>\`;
+        }
+
+        function wireCitiesTab() {
+          const discoverBtn = document.getElementById("discoverBtn");
+          if (discoverBtn) discoverBtn.addEventListener("click", discoverCityLists);
+          appEl.querySelectorAll(".sync-list-btn").forEach((el) => el.addEventListener("click", (e) =>
+            syncCityList(e.currentTarget.getAttribute("data-type"), e.currentTarget.getAttribute("data-id"))));
         }
 
         loadAll().then(render);

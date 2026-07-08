@@ -226,3 +226,42 @@ export function addAdminUser(db: Db, memberId: string, userId: number, name: str
 export function removeAdminUser(db: Db, memberId: string, userId: number) {
   db.prepare(`DELETE FROM admin_users WHERE member_id = ? AND user_id = ?`).run(memberId, userId);
 }
+
+export function getSetting(db: Db, memberId: string, key: string): string | null {
+  const row = db.prepare(`SELECT value FROM app_settings WHERE member_id = ? AND key = ?`).get(memberId, key) as
+    | { value: string }
+    | undefined;
+  return row?.value ?? null;
+}
+
+export function setSetting(db: Db, memberId: string, key: string, value: string) {
+  const now = Date.now();
+  db.prepare(
+    `
+    INSERT INTO app_settings (member_id, key, value, updated_at_ms)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(member_id, key) DO UPDATE SET value=excluded.value, updated_at_ms=excluded.updated_at_ms
+  `,
+  ).run(memberId, key, value, now);
+}
+
+export type CityDirectoryEntry = { externalId: string; name: string; sort: number };
+
+export function listCityDirectory(db: Db, memberId: string): CityDirectoryEntry[] {
+  const rows = db
+    .prepare(`SELECT external_id, name, sort FROM city_directory WHERE member_id = ? ORDER BY sort ASC, name ASC`)
+    .all(memberId) as Array<{ external_id: string; name: string; sort: number }>;
+  return rows.map((r) => ({ externalId: r.external_id, name: r.name, sort: r.sort }));
+}
+
+export function replaceCityDirectory(db: Db, memberId: string, entries: CityDirectoryEntry[]) {
+  const now = Date.now();
+  const tx = db.transaction(() => {
+    db.prepare(`DELETE FROM city_directory WHERE member_id = ?`).run(memberId);
+    const insert = db.prepare(
+      `INSERT INTO city_directory (member_id, external_id, name, sort, updated_at_ms) VALUES (?, ?, ?, ?, ?)`,
+    );
+    for (const e of entries) insert.run(memberId, e.externalId, e.name, e.sort, now);
+  });
+  tx();
+}

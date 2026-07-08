@@ -7,10 +7,14 @@ import {
   deletePromotion,
   getPortalAuth,
   getSelection,
+  getSetting,
   isAdminUserAllowed,
   listAdminUsers,
+  listCityDirectory,
   listPromotions,
   removeAdminUser,
+  replaceCityDirectory,
+  setSetting,
   upsertPortalAuth,
   upsertPromotion,
   upsertSelection,
@@ -21,6 +25,7 @@ import { renderAdminPage } from "./web/adminPage.js";
 import { setupPromoFields, catalogFacets, type FieldCodes } from "./b24/setup.js";
 import { resolveEnumIds, ensureEnumHasValues } from "./b24/enumSync.js";
 import { checkIsAdmin, searchPortalUsers } from "./b24/adminAuth.js";
+import { discoverLists, fetchListElements } from "./b24/bitrixLists.js";
 import { exchangeCodeForToken } from "./b24/oauth.js";
 import { callB24 } from "./b24/rest.js";
 
@@ -62,7 +67,7 @@ app.get("/", async (req, res) => {
       "",
       "Health: /health",
       "Dev preview: /dev/field-preview",
-      "Userfield handler: /b24/userfield/promo",
+      "Promo tab handler: /b24/promo-tab",
       "Admin panel: /b24/admin",
       "Setup: POST /api/b24/setup",
     ].join("\n"),
@@ -93,21 +98,36 @@ function parsePlacementOptions(req: express.Request): Record<string, unknown> {
   return {};
 }
 
-// Bitrix24 USERFIELD_TYPE handler for the "promo_selector" widget.
-app.all("/b24/userfield/promo", (req, res) => {
+// Bitrix24 CRM_DEAL_DETAIL_TAB / CRM_LEAD_DETAIL_TAB placement handler: the "Акции" tab.
+app.all("/b24/promo-tab", (req, res) => {
   const merged = { ...req.query, ...req.body } as Record<string, unknown>;
   const { domain, memberId, authId, refreshId } = captureAuthFromRequest(merged);
   const lang = String(merged.LANG ?? "ru");
-  const placement = String(merged.PLACEMENT ?? "USERFIELD_TYPE");
+  const placement = String(merged.PLACEMENT ?? "CRM_DEAL_DETAIL_TAB");
+  const entityType: "DEAL" | "LEAD" = placement.includes("LEAD") ? "LEAD" : "DEAL";
 
   const placementOptions = parsePlacementOptions(req);
+  const entityId =
+    Number(placementOptions.ID ?? placementOptions.ENTITY_VALUE_ID ?? placementOptions.ENTITY_ID ?? 0) || 0;
+
   const today = new Date().toISOString().slice(0, 10);
   const catalog = listPromotions(db).filter((p) => promoIsActiveToday(p, today));
+  const initialSelection = memberId && entityId ? (getSelection(db, memberId, entityType, entityId) ?? []) : [];
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(
     renderPromoWidgetPage(
-      { domain, lang, placement, placementOptions, authId, refreshId: refreshId ?? undefined, memberId, catalog },
+      {
+        domain,
+        lang,
+        entityType,
+        entityId,
+        authId,
+        refreshId: refreshId ?? undefined,
+        memberId,
+        catalog,
+        initialSelection,
+      },
       API_BASE_URL,
     ),
   );
@@ -145,21 +165,15 @@ app.all("/b24/admin", (req, res) => {
 });
 
 app.get("/dev/field-preview", (req, res) => {
-  const mode = String(req.query.mode || "edit");
-  const entityId = String(req.query.entityId || "CRM_DEAL");
-  const entityValueId = Number(req.query.entityValueId || 123);
-  const value = typeof req.query.value === "string" ? req.query.value : "[]";
+  const entityType = String(req.query.entityType || "DEAL") === "LEAD" ? "LEAD" : "DEAL";
+  const entityId = Number(req.query.entityId || 123);
 
-  const placementOptions = {
-    MODE: mode,
-    ENTITY_ID: entityId,
-    ENTITY_VALUE_ID: entityValueId,
-    VALUE: value,
-  };
+  const placement = entityType === "LEAD" ? "CRM_LEAD_DETAIL_TAB" : "CRM_DEAL_DETAIL_TAB";
+  const placementOptions = { ID: entityId };
   const q = new URLSearchParams({
     DOMAIN: "dev.local",
     LANG: "ru",
-    PLACEMENT: "USERFIELD_TYPE",
+    PLACEMENT: placement,
     AUTH_ID: "dev-token",
     member_id: "dev-member",
     PLACEMENT_OPTIONS: JSON.stringify(placementOptions),
@@ -167,11 +181,11 @@ app.get("/dev/field-preview", (req, res) => {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(`<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"/><title>Dev preview</title>
-<style>body{font:14px sans-serif;margin:16px;}iframe{width:100%;height:650px;border:1px solid #e5e7eb;border-radius:10px;}</style>
+<style>body{font:14px sans-serif;margin:16px;}iframe{width:100%;height:750px;border:1px solid #e5e7eb;border-radius:10px;}</style>
 </head><body>
-<h2>Предпросмотр виджета «Выбор акции»</h2>
-<div class="muted">entityId=${entityId}, entityValueId=${entityValueId}, mode=${mode}</div>
-<iframe src="/b24/userfield/promo?${q.toString()}"></iframe>
+<h2>Предпросмотр вкладки «Акции»</h2>
+<div class="muted">entityType=${entityType}, entityId=${entityId}</div>
+<iframe src="/b24/promo-tab?${q.toString()}"></iframe>
 </body></html>`);
 });
 
@@ -417,6 +431,56 @@ app.post("/api/admin/resync-fields", async (req, res) => {
     result[entity] = { city: cityRes.ok, brand: brandRes.ok, type: typeRes.ok };
   }
   return res.json({ ok: true, result });
+});
+
+const CITY_LIST_IBLOCK_TYPE_KEY = "city_list_iblock_type_id";
+const CITY_LIST_IBLOCK_ID_KEY = "city_list_iblock_id";
+
+// Enumerates the portal's Bitrix24 "Списки" (universal lists) so an admin can pick which one
+// holds the canonical city directory (e.g. https://<portal>/company/lists/<id>/...).
+app.post("/api/admin/citylist/discover", async (req, res) => {
+  const auth = await resolveAdminAuth(req);
+  if (!auth.isPortalAdmin) return res.status(403).json({ error: "forbidden" });
+  if (!auth.domain || !auth.accessToken) return res.status(400).json({ error: "missing_access_token" });
+  const lists = await discoverLists(db, { domain: auth.domain, memberId: auth.memberId, accessToken: auth.accessToken });
+  return res.json({ ok: true, lists });
+});
+
+app.post("/api/admin/citylist/config", async (req, res) => {
+  const auth = await resolveAdminAuth(req);
+  if (!auth.isPortalAdmin) return res.status(403).json({ error: "forbidden" });
+  return res.json({
+    ok: true,
+    iblockTypeId: getSetting(db, auth.memberId, CITY_LIST_IBLOCK_TYPE_KEY),
+    iblockId: getSetting(db, auth.memberId, CITY_LIST_IBLOCK_ID_KEY),
+    entries: listCityDirectory(db, auth.memberId),
+  });
+});
+
+// Pulls every element from the chosen "Списки" iblock into our local city_directory mirror.
+app.post("/api/admin/citylist/sync", async (req, res) => {
+  const auth = await resolveAdminAuth(req);
+  if (!auth.isPortalAdmin) return res.status(403).json({ error: "forbidden" });
+  if (!auth.domain || !auth.accessToken) return res.status(400).json({ error: "missing_access_token" });
+  const iblockTypeId = String(req.body?.iblockTypeId || "");
+  const iblockId = String(req.body?.iblockId || "");
+  if (!iblockTypeId || !iblockId) return res.status(400).json({ error: "missing_iblock" });
+
+  const elements = await fetchListElements(db, {
+    domain: auth.domain,
+    memberId: auth.memberId,
+    accessToken: auth.accessToken,
+    iblockTypeId,
+    iblockId,
+  });
+  replaceCityDirectory(
+    db,
+    auth.memberId,
+    elements.map((e, i) => ({ externalId: e.ID, name: e.NAME, sort: Number(e.SORT || i) })),
+  );
+  setSetting(db, auth.memberId, CITY_LIST_IBLOCK_TYPE_KEY, iblockTypeId);
+  setSetting(db, auth.memberId, CITY_LIST_IBLOCK_ID_KEY, iblockId);
+  return res.json({ ok: true, count: elements.length });
 });
 
 const SetupBodySchema = z.object({
