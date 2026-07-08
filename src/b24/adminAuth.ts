@@ -17,6 +17,24 @@ export async function checkIsAdmin(
   return res.ok && res.result === true;
 }
 
+/** Returns the id of the user whose access token this is (via user.current), or 0. */
+export async function getCurrentUserId(
+  db: Db,
+  ctx: { domain: string; memberId: string; accessToken: string },
+): Promise<number> {
+  if (!ctx.domain || !ctx.accessToken) return 0;
+  const res = await callB24<{ ID?: string | number }>(db, {
+    domain: ctx.domain,
+    memberId: ctx.memberId,
+    accessToken: ctx.accessToken,
+    method: "user.current",
+    body: {},
+  });
+  if (!res.ok) return 0;
+  const id = Number(res.result?.ID ?? 0);
+  return Number.isFinite(id) ? id : 0;
+}
+
 export type PortalUser = { ID: string; NAME?: string; LAST_NAME?: string; EMAIL?: string; ACTIVE?: boolean };
 
 function formatUserName(u: PortalUser): string {

@@ -26,7 +26,7 @@ import { renderPromoWidgetPage } from "./web/promoWidgetPage.js";
 import { renderAdminPage } from "./web/adminPage.js";
 import { setupPromoFields, catalogFacets, type FieldCodes } from "./b24/setup.js";
 import { resolveEnumIds, ensureEnumHasValues } from "./b24/enumSync.js";
-import { checkIsAdmin, searchPortalUsers } from "./b24/adminAuth.js";
+import { checkIsAdmin, getCurrentUserId, searchPortalUsers } from "./b24/adminAuth.js";
 import { discoverLists, fetchListElements } from "./b24/bitrixLists.js";
 import { exchangeCodeForToken } from "./b24/oauth.js";
 import { callB24 } from "./b24/rest.js";
@@ -342,8 +342,14 @@ async function resolveAdminAuth(req: express.Request): Promise<AdminAuth> {
     return { ok: true, isPortalAdmin: true, domain, memberId, accessToken, userId };
   }
   const isPortalAdmin = await checkIsAdmin(db, { domain, memberId, accessToken });
-  const isAllowedUser = !isPortalAdmin && userId > 0 && isAdminUserAllowed(db, memberId, userId);
-  return { ok: isPortalAdmin || isAllowedUser, isPortalAdmin, domain, memberId, accessToken, userId };
+  // BX24.getAuth() on the client often omits user_id, so resolve the opener's id server-side
+  // from their own token — otherwise the allowlist check can never match.
+  let effectiveUserId = userId;
+  if (!isPortalAdmin && effectiveUserId <= 0) {
+    effectiveUserId = await getCurrentUserId(db, { domain, memberId, accessToken });
+  }
+  const isAllowedUser = !isPortalAdmin && effectiveUserId > 0 && isAdminUserAllowed(db, memberId, effectiveUserId);
+  return { ok: isPortalAdmin || isAllowedUser, isPortalAdmin, domain, memberId, accessToken, userId: effectiveUserId };
 }
 
 app.post("/api/admin/whoami", async (req, res) => {
