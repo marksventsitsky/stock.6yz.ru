@@ -65,12 +65,12 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
 
         function computeStatus(p) {
           if (!p.active) return { kind: "off", label: "Выключена" };
-          if (p.periodEnd) {
-            if (p.periodEnd < TODAY) return { kind: "expired", label: "Истекла" };
-            if (daysBetween(TODAY, p.periodEnd) <= EXPIRING_SOON_DAYS) return { kind: "expiring", label: "Истекает " + fmtShort(p.periodEnd) };
-          }
-          if (!p.periodStart && !p.periodEnd) return { kind: "permanent", label: "Постоянная" };
+          // Not started yet (has a future start date).
           if (p.periodStart && p.periodStart > TODAY) return { kind: "draft", label: "Ещё не началась" };
+          // No end date → open-ended / permanent (even if it has a start date).
+          if (!p.periodEnd) return { kind: "permanent", label: "Бессрочная" };
+          if (p.periodEnd < TODAY) return { kind: "expired", label: "Истекла" };
+          if (daysBetween(TODAY, p.periodEnd) <= EXPIRING_SOON_DAYS) return { kind: "expiring", label: "Истекает " + fmtShort(p.periodEnd) };
           return { kind: "active", label: "Активна" };
         }
         function statusPillHtml(status) {
@@ -94,6 +94,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
         }
 
         let catalog = [];
+        let publicPromos = [];
         let isAdmin = false;
         let isPortalAdmin = false;
         let accessUsers = [];
@@ -162,6 +163,13 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
             const check = await api("/api/admin/whoami", { method: "POST", body: a });
             isAdmin = !!check.isAdmin;
             isPortalAdmin = !!check.isPortalAdmin;
+            if (!isAdmin) {
+              // Non-admins get a read-only view of active promos, no admin data.
+              const pub = await api("/api/public/promotions", { method: "POST", body: {} });
+              publicPromos = pub.items || [];
+              setStatus("", "");
+              return;
+            }
             const list = await api("/api/admin/catalog", { method: "POST", body: a });
             catalog = list.items || [];
             if (isPortalAdmin) {
@@ -320,9 +328,49 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           return '<div class="' + cls + '" data-tab="' + key + '">' + label + (count != null ? ' <span class="count">' + count + '</span>' : '') + '</div>';
         }
 
+        function fmtPeriod(p) {
+          const s = fmtShort(p.periodStart), e = fmtShort(p.periodEnd);
+          if (!p.periodEnd) return "бессрочно";
+          if (s && e) return s + " – " + e;
+          if (e) return "до " + e;
+          return "";
+        }
+
+        // Read-only catalog for employees without admin access.
+        function renderPublicCatalog() {
+          const groups = {};
+          publicPromos.forEach((p) => { const b = p.brand || "Прочее"; (groups[b] = groups[b] || []).push(p); });
+          const brandNames = Object.keys(groups).sort((a, b) => a.localeCompare(b, "ru"));
+
+          const groupsHtml = brandNames.map((b) => \`
+            <div style="margin-bottom:18px">
+              <div style="font-size:13px;font-weight:700;color:var(--text);margin:0 0 8px 2px">\${escapeHtml(b)} <span style="color:var(--text-secondary);font-weight:500">\${groups[b].length}</span></div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px">
+                \${groups[b].map((p) => \`
+                  <div class="ds-card" style="padding:12px">
+                    <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:6px">\${escapeHtml(p.title || "")}</div>
+                    \${p.description ? '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px">' + escapeHtml(p.description) + '</div>' : ""}
+                    <div style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:6px">
+                      \${(p.cities || []).map((c) => '<span class="ds-chip ds-chip-accent">' + escapeHtml(c) + '</span>').join("")}
+                      \${p.type ? '<span class="ds-chip ds-chip-neutral">' + escapeHtml(p.type) + '</span>' : ""}
+                    </div>
+                    <div style="font-size:11.5px;color:var(--text-muted)">\${escapeHtml(fmtPeriod(p))}\${(p.placements||[]).length ? " · " + escapeHtml((p.placements||[]).join(", ")) : ""}</div>
+                  </div>\`).join("")}
+              </div>
+            </div>\`).join("");
+
+          appEl.innerHTML = \`
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:14px">
+              <div class="ds-h1">Действующие акции</div>
+              <span style="font-size:12px;color:var(--text-secondary)">\${publicPromos.length}</span>
+            </div>
+            \${publicPromos.length ? groupsHtml : '<div class="ds-card" style="padding:20px;text-align:center;color:var(--text-muted)">Сейчас нет действующих акций</div>'}
+          \`;
+        }
+
         function render() {
           if (!isAdmin) {
-            appEl.innerHTML = '<div class="ds-h1" style="margin-bottom:12px">Акции — админка</div><div class="ds-card" style="padding:12px;border-color:#f3c9c9;background:var(--danger-bg);color:var(--danger-text)">У вас нет доступа к этому разделу. Обратитесь к администратору портала, чтобы он выдал вам доступ.</div>';
+            renderPublicCatalog();
             return;
           }
 
@@ -386,7 +434,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
               <select id="statusFilterSel" class="ds-select" style="width:auto">
                 <option value="">Статус: все</option>
                 <option value="active" \${statusFilter === "active" ? "selected" : ""}>Активна</option>
-                <option value="permanent" \${statusFilter === "permanent" ? "selected" : ""}>Постоянная</option>
+                <option value="permanent" \${statusFilter === "permanent" ? "selected" : ""}>Бессрочная</option>
                 <option value="expiring" \${statusFilter === "expiring" ? "selected" : ""}>Истекает</option>
                 <option value="expired" \${statusFilter === "expired" ? "selected" : ""}>Истекла</option>
                 <option value="off" \${statusFilter === "off" ? "selected" : ""}>Выключена</option>
@@ -405,9 +453,9 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
                       <th style="width:120px">Статус</th>
                       <th>Акция</th>
                       <th style="width:150px">Города</th>
-                      <th style="width:84px">С</th>
-                      <th style="width:84px">По</th>
-                      <th style="width:70px"></th>
+                      <th style="width:120px">С</th>
+                      <th style="width:120px">По</th>
+                      <th style="width:150px"></th>
                     </tr>
                   </thead>
                   <tbody>

@@ -63,7 +63,7 @@ export const DESIGN_SYSTEM_CSS = `
 
   /* "Quiet" input: looks like plain text until hover/focus (table cells) */
   .ds-input-quiet {
-    width: 100%; box-sizing: border-box; padding: 4px 6px; border: 1px solid transparent; border-radius: 4px;
+    width: 100%; min-width: 0; box-sizing: border-box; padding: 4px 6px; border: 1px solid transparent; border-radius: 4px;
     font: inherit; font-size: 12.5px; color: var(--text); background: transparent;
   }
   .ds-input-quiet:hover { border-color: var(--border-input); background: var(--surface); }

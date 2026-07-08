@@ -351,6 +351,14 @@ app.post("/api/admin/whoami", async (req, res) => {
   return res.json({ ok: true, isAdmin: auth.ok, isPortalAdmin: auth.isPortalAdmin });
 });
 
+// Read-only list of currently-active promos for everyone (no admin gate) — powers the
+// simple catalog view shown to non-admin employees who open the app.
+app.post("/api/public/promotions", (_req, res) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const items = listPromotions(db).filter((p) => promoIsActiveToday(p, today));
+  return res.json({ ok: true, items });
+});
+
 app.post("/api/admin/access/list", async (req, res) => {
   const auth = await resolveAdminAuth(req);
   if (!auth.isPortalAdmin) return res.status(403).json({ error: "forbidden" });
