@@ -4,6 +4,7 @@ import { z } from "zod";
 import { openDb } from "./storage/db.js";
 import {
   addAdminUser,
+  addManualDirectoryEntry,
   deletePromotion,
   getPortalAuth,
   getSelection,
@@ -13,6 +14,7 @@ import {
   listDirectory,
   listPromotions,
   removeAdminUser,
+  removeDirectoryEntry,
   replaceDirectory,
   setSetting,
   upsertPortalAuth,
@@ -454,7 +456,7 @@ app.post("/api/admin/resync-fields", async (req, res) => {
   return res.json({ ok: true, result });
 });
 
-const DIRECTORY_KINDS = new Set(["city", "direction"]);
+const DIRECTORY_KINDS = new Set(["city", "direction", "placement"]);
 function directorySettingKeys(kind: string) {
   return { typeKey: `${kind}_list_iblock_type_id`, idKey: `${kind}_list_iblock_id` };
 }
@@ -479,8 +481,31 @@ app.post("/api/admin/directory/config", async (req, res) => {
     ok: true,
     iblockTypeId: getSetting(db, auth.memberId, typeKey),
     iblockId: getSetting(db, auth.memberId, idKey),
-    entries: listDirectory(db, auth.memberId, kind as "city" | "direction"),
+    entries: listDirectory(db, auth.memberId, kind as "city" | "direction" | "placement"),
   });
+});
+
+// Manually-managed directories (no Bitrix "Списки" backing) — e.g. Размещения.
+app.post("/api/admin/directory/add-manual", async (req, res) => {
+  const auth = await resolveAdminAuth(req);
+  if (!auth.isPortalAdmin) return res.status(403).json({ error: "forbidden" });
+  const kind = String(req.body?.kind || "");
+  const name = String(req.body?.name || "").trim();
+  if (!DIRECTORY_KINDS.has(kind)) return res.status(400).json({ error: "invalid_kind" });
+  if (!name) return res.status(400).json({ error: "missing_name" });
+  addManualDirectoryEntry(db, auth.memberId, kind as "city" | "direction" | "placement", name);
+  return res.json({ ok: true });
+});
+
+app.post("/api/admin/directory/remove-manual", async (req, res) => {
+  const auth = await resolveAdminAuth(req);
+  if (!auth.isPortalAdmin) return res.status(403).json({ error: "forbidden" });
+  const kind = String(req.body?.kind || "");
+  const externalId = String(req.body?.externalId || "");
+  if (!DIRECTORY_KINDS.has(kind)) return res.status(400).json({ error: "invalid_kind" });
+  if (!externalId) return res.status(400).json({ error: "missing_external_id" });
+  removeDirectoryEntry(db, auth.memberId, kind as "city" | "direction" | "placement", externalId);
+  return res.json({ ok: true });
 });
 
 // Pulls every element from the chosen "Списки" iblock into our local directory mirror.
@@ -504,7 +529,7 @@ app.post("/api/admin/directory/sync", async (req, res) => {
   replaceDirectory(
     db,
     auth.memberId,
-    kind as "city" | "direction",
+    kind as "city" | "direction" | "placement",
     elements.map((e, i) => ({ externalId: e.ID, name: e.NAME, sort: Number(e.SORT || i) })),
   );
   const { typeKey, idKey } = directorySettingKeys(kind);

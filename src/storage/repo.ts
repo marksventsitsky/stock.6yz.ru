@@ -245,7 +245,7 @@ export function setSetting(db: Db, memberId: string, key: string, value: string)
   ).run(memberId, key, value, now);
 }
 
-export type DirectoryKind = "city" | "direction";
+export type DirectoryKind = "city" | "direction" | "placement";
 export type DirectoryEntry = { externalId: string; name: string; sort: number };
 
 export function listDirectory(db: Db, memberId: string, kind: DirectoryKind): DirectoryEntry[] {
@@ -265,4 +265,24 @@ export function replaceDirectory(db: Db, memberId: string, kind: DirectoryKind, 
     for (const e of entries) insert.run(memberId, kind, e.externalId, e.name, e.sort, now);
   });
   tx();
+}
+
+/** Manually-managed directory entries (no Bitrix "Списки" backing), e.g. Размещения. */
+export function addManualDirectoryEntry(db: Db, memberId: string, kind: DirectoryKind, name: string) {
+  const now = Date.now();
+  const externalId = "manual:" + name;
+  const row = db
+    .prepare(`SELECT COALESCE(MAX(sort), -1) as m FROM list_directory WHERE member_id = ? AND kind = ?`)
+    .get(memberId, kind) as { m: number };
+  db.prepare(
+    `
+    INSERT INTO list_directory (member_id, kind, external_id, name, sort, updated_at_ms)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(member_id, kind, external_id) DO UPDATE SET name=excluded.name, updated_at_ms=excluded.updated_at_ms
+  `,
+  ).run(memberId, kind, externalId, name, row.m + 1, now);
+}
+
+export function removeDirectoryEntry(db: Db, memberId: string, kind: DirectoryKind, externalId: string) {
+  db.prepare(`DELETE FROM list_directory WHERE member_id = ? AND kind = ? AND external_id = ?`).run(memberId, kind, externalId);
 }

@@ -99,6 +99,7 @@ export const DESIGN_SYSTEM_CSS = `
   .ds-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 600; white-space: nowrap; }
   .ds-status-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
   .ds-status.active { color: var(--success); } .ds-status.active .ds-status-dot { background: var(--success); }
+  .ds-status.permanent { color: var(--success); } .ds-status.permanent .ds-status-dot { background: var(--success); }
   .ds-status.expiring { color: var(--warning-text); } .ds-status.expiring .ds-status-dot { background: var(--warning); }
   .ds-status.expired { color: var(--danger-text); } .ds-status.expired .ds-status-dot { background: var(--danger); }
   .ds-status.off { color: var(--text-secondary); } .ds-status.off .ds-status-dot { background: var(--text-muted); }

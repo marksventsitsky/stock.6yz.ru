@@ -69,6 +69,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
             if (p.periodEnd < TODAY) return { kind: "expired", label: "Истекла" };
             if (daysBetween(TODAY, p.periodEnd) <= EXPIRING_SOON_DAYS) return { kind: "expiring", label: "Истекает " + fmtShort(p.periodEnd) };
           }
+          if (!p.periodStart && !p.periodEnd) return { kind: "permanent", label: "Постоянная" };
           if (p.periodStart && p.periodStart > TODAY) return { kind: "draft", label: "Ещё не началась" };
           return { kind: "active", label: "Активна" };
         }
@@ -99,6 +100,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
         let userSearchResults = [];
         let cityConfig = { iblockTypeId: null, iblockId: null, entries: [] };
         let directionConfig = { iblockTypeId: null, iblockId: null, entries: [] };
+        let placementConfig = { entries: [] };
         let discoveredLists = [];
         let statusText = "", statusKind = "";
         let tab = "catalog"; // catalog | access | directories
@@ -144,6 +146,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
         }
         function placementOptions() {
+          if (placementConfig.entries && placementConfig.entries.length) return placementConfig.entries.map((e) => e.name);
           const set = new Set();
           catalog.forEach((p) => (p.placements || []).forEach((x) => set.add(x)));
           ["Сайт", "Директ", "КЦ", "ТВ", "SMM", "Франчайзи"].forEach((x) => set.add(x));
@@ -166,6 +169,8 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
               cityConfig = { iblockTypeId: cityCfg.iblockTypeId, iblockId: cityCfg.iblockId, entries: cityCfg.entries || [] };
               const dirCfg = await api("/api/admin/directory/config", { method: "POST", body: { ...a, kind: "direction" } });
               directionConfig = { iblockTypeId: dirCfg.iblockTypeId, iblockId: dirCfg.iblockId, entries: dirCfg.entries || [] };
+              const plCfg = await api("/api/admin/directory/config", { method: "POST", body: { ...a, kind: "placement" } });
+              placementConfig = { entries: plCfg.entries || [] };
             }
             setStatus("", "");
           } catch (e) {
@@ -279,6 +284,24 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           } catch (e) { setStatus("error", "Ошибка синхронизации: " + (e && e.message ? e.message : String(e))); }
         }
 
+        async function addManualEntry(kind, name) {
+          if (!name || !name.trim()) return;
+          const a = auth();
+          try {
+            await api("/api/admin/directory/add-manual", { method: "POST", body: { ...a, kind, name: name.trim() } });
+            setStatus("ok", "Добавлено");
+            await loadAll();
+          } catch (e) { setStatus("error", "Ошибка: " + (e && e.message ? e.message : String(e))); }
+        }
+        async function removeManualEntry(kind, externalId) {
+          const a = auth();
+          try {
+            await api("/api/admin/directory/remove-manual", { method: "POST", body: { ...a, kind, externalId } });
+            setStatus("ok", "Удалено");
+            await loadAll();
+          } catch (e) { setStatus("error", "Ошибка: " + (e && e.message ? e.message : String(e))); }
+        }
+
         function tabHtml(key, label, count) {
           const cls = "ds-tab" + (tab === key ? " active" : "");
           return '<div class="' + cls + '" data-tab="' + key + '">' + label + (count != null ? ' <span class="count">' + count + '</span>' : '') + '</div>';
@@ -350,6 +373,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
               <select id="statusFilterSel" class="ds-select" style="width:auto">
                 <option value="">Статус: все</option>
                 <option value="active" \${statusFilter === "active" ? "selected" : ""}>Активна</option>
+                <option value="permanent" \${statusFilter === "permanent" ? "selected" : ""}>Постоянная</option>
                 <option value="expiring" \${statusFilter === "expiring" ? "selected" : ""}>Истекает</option>
                 <option value="expired" \${statusFilter === "expired" ? "selected" : ""}>Истекла</option>
                 <option value="off" \${statusFilter === "off" ? "selected" : ""}>Выключена</option>
@@ -411,7 +435,10 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
               <td>\${citiesChipHtml(r.cities)}</td>
               <td><input type="date" class="ds-input-quiet" data-act="edit-date-start" data-key="\${escapeHtml(key)}" value="\${escapeHtml(r.periodStart || "")}"/></td>
               <td><input type="date" class="ds-input-quiet" data-act="edit-date-end" data-key="\${escapeHtml(key)}" value="\${escapeHtml(r.periodEnd || "")}"/></td>
-              <td style="text-align:right"><span data-act="open-drawer" data-key="\${escapeHtml(key)}" style="font-size:12px;color:var(--accent);cursor:pointer">Открыть</span></td>
+              <td style="text-align:right;white-space:nowrap">
+                <span data-act="duplicate-row" data-key="\${escapeHtml(key)}" style="font-size:12px;color:var(--text-secondary);cursor:pointer;margin-right:10px" title="Создать новую акцию на основе этой">Копировать</span>
+                <span data-act="open-drawer" data-key="\${escapeHtml(key)}" style="font-size:12px;color:var(--accent);cursor:pointer">Открыть</span>
+              </td>
             </tr>\`;
         }
 
@@ -495,6 +522,14 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           drawerDraft = blankPromo();
           render();
         }
+        function duplicateRow(row) {
+          const draft = JSON.parse(JSON.stringify(row));
+          draft.id = "";
+          draft.sort = catalog.length;
+          drawerRowKey = "__new";
+          drawerDraft = draft;
+          render();
+        }
         function closeDrawer() { drawerRowKey = null; drawerDraft = null; render(); }
 
         function wireCatalogTab() {
@@ -543,6 +578,11 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
             const key = e.currentTarget.getAttribute("data-key");
             const row = catalog.find((r) => rowKey(r) === key);
             if (row) openDrawer(row);
+          }));
+          appEl.querySelectorAll('[data-act="duplicate-row"]').forEach((el) => el.addEventListener("click", (e) => {
+            const key = e.currentTarget.getAttribute("data-key");
+            const row = catalog.find((r) => rowKey(r) === key);
+            if (row) duplicateRow(row);
           }));
 
           if (drawerDraft) wireDrawer();
@@ -656,6 +696,23 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
             </div>\`;
         }
 
+        function manualDirectorySectionHtml(kind, title, cfg) {
+          const chips = cfg.entries.map((e) =>
+            '<span class="ds-chip ds-chip-neutral">' + escapeHtml(e.name) +
+              ' <span class="ds-chip-remove manual-remove-btn" data-kind="' + kind + '" data-id="' + escapeHtml(e.externalId) + '">×</span></span>'
+          ).join("");
+          return \`
+            <div class="ds-card" style="padding:14px">
+              <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">\${title}</div>
+              <p class="ds-muted" style="margin:0 0 10px">Свой список значений (без привязки к «Спискам» Битрикс24) — добавляйте и убирайте прямо здесь.</p>
+              <div style="display:flex;gap:8px;margin-bottom:10px">
+                <input type="text" id="manualAddInput_\${kind}" class="ds-input" placeholder="Новое значение…"/>
+                <button type="button" class="ds-btn ds-btn-outline manual-add-btn" data-kind="\${kind}">Добавить</button>
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px">\${chips || '<span class="ds-muted">Пока пусто — используются значения из уже введённых акций.</span>'}</div>
+            </div>\`;
+        }
+
         function directoriesTabHtml() {
           return \`
             <div style="padding:16px">
@@ -663,6 +720,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
               <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
                 \${directorySectionHtml("city", "Города", cityConfig)}
                 \${directorySectionHtml("direction", "Направления продаж", directionConfig)}
+                \${manualDirectorySectionHtml("placement", "Размещения", placementConfig)}
               </div>
             </div>
           \`;
@@ -673,6 +731,14 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           if (discoverBtn) discoverBtn.addEventListener("click", discoverDirectoryLists);
           appEl.querySelectorAll(".sync-list-btn").forEach((el) => el.addEventListener("click", (e) =>
             syncDirectory(e.currentTarget.getAttribute("data-kind"), e.currentTarget.getAttribute("data-type"), e.currentTarget.getAttribute("data-id"))));
+          appEl.querySelectorAll(".manual-add-btn").forEach((el) => el.addEventListener("click", (e) => {
+            const kind = e.currentTarget.getAttribute("data-kind");
+            const input = document.getElementById("manualAddInput_" + kind);
+            const value = input ? input.value : "";
+            addManualEntry(kind, value);
+          }));
+          appEl.querySelectorAll(".manual-remove-btn").forEach((el) => el.addEventListener("click", (e) =>
+            removeManualEntry(e.currentTarget.getAttribute("data-kind"), e.currentTarget.getAttribute("data-id"))));
         }
 
         loadAll().then(render);
