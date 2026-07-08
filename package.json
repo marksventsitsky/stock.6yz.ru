@@ -1,0 +1,30 @@
+{
+  "name": "b24-stock-promo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "seed": "tsx src/scripts/seedCatalog.ts",
+    "lint": "eslint .",
+    "format": "prettier -w ."
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.2.0",
+    "express": "^5.1.0",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.31.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.3",
+    "@types/node": "^24.3.0",
+    "eslint": "^9.31.0",
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "typescript-eslint": "^8.39.0"
+  }
+}

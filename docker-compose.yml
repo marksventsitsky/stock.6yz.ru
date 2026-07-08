@@ -1,0 +1,17 @@
+services:
+  b24-stock-promo:
+    build: .
+    container_name: b24-stock-promo
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - PORT=8788
+      - DB_PATH=/data/data.sqlite
+    volumes:
+      - b24-stock-promo-data:/data
+    ports:
+      - "127.0.0.1:8788:8788"
+
+volumes:
+  b24-stock-promo-data:
