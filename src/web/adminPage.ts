@@ -305,6 +305,15 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
             await loadAll();
           } catch (e) { setStatus("error", "Ошибка: " + (e && e.message ? e.message : String(e))); }
         }
+        async function seedManualDirectory(kind) {
+          const a = auth();
+          setStatus("muted", "Собираю значения из каталога…");
+          try {
+            const res = await api("/api/admin/directory/seed-from-catalog", { method: "POST", body: { ...a, kind } });
+            setStatus("ok", "Добавлено значений: " + res.count);
+            await loadAll();
+          } catch (e) { setStatus("error", "Ошибка: " + (e && e.message ? e.message : String(e))); }
+        }
 
         function tabHtml(key, label, count) {
           const cls = "ds-tab" + (tab === key ? " active" : "");
@@ -714,8 +723,9 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
               <div style="display:flex;gap:8px;margin-bottom:10px">
                 <input type="text" id="manualAddInput_\${kind}" class="ds-input" placeholder="Новое значение…"/>
                 <button type="button" class="ds-btn ds-btn-outline manual-add-btn" data-kind="\${kind}">Добавить</button>
+                <button type="button" class="ds-btn ds-btn-plain manual-seed-btn" data-kind="\${kind}">Заполнить из каталога</button>
               </div>
-              <div style="display:flex;flex-wrap:wrap;gap:6px">\${chips || '<span class="ds-muted">Пока пусто — используются значения из уже введённых акций.</span>'}</div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px">\${chips || '<span class="ds-muted">Пока пусто.</span>'}</div>
             </div>\`;
         }
 
@@ -746,6 +756,8 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           }));
           appEl.querySelectorAll(".manual-remove-btn").forEach((el) => el.addEventListener("click", (e) =>
             removeManualEntry(e.currentTarget.getAttribute("data-kind"), e.currentTarget.getAttribute("data-id"))));
+          appEl.querySelectorAll(".manual-seed-btn").forEach((el) => el.addEventListener("click", (e) =>
+            seedManualDirectory(e.currentTarget.getAttribute("data-kind"))));
         }
 
         loadAll().then(render);

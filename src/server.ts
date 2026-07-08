@@ -508,6 +508,25 @@ app.post("/api/admin/directory/remove-manual", async (req, res) => {
   return res.json({ ok: true });
 });
 
+// Bootstraps a manually-managed directory (placements/types) from the values already
+// typed into the promo catalog, so the admin isn't starting from a blank list.
+app.post("/api/admin/directory/seed-from-catalog", async (req, res) => {
+  const auth = await resolveAdminAuth(req);
+  if (!auth.isPortalAdmin) return res.status(403).json({ error: "forbidden" });
+  const kind = String(req.body?.kind || "");
+  if (kind !== "placement" && kind !== "type") return res.status(400).json({ error: "invalid_kind" });
+
+  const values = new Set<string>();
+  for (const promo of listPromotions(db)) {
+    if (kind === "placement") promo.placements.forEach((v) => values.add(v));
+    else if (promo.type) values.add(promo.type);
+  }
+  if (kind === "placement") ["Сайт", "Директ", "КЦ", "ТВ", "SMM", "Франчайзи"].forEach((v) => values.add(v));
+
+  for (const name of values) addManualDirectoryEntry(db, auth.memberId, kind, name);
+  return res.json({ ok: true, count: values.size });
+});
+
 // Pulls every element from the chosen "Списки" iblock into our local directory mirror.
 app.post("/api/admin/directory/sync", async (req, res) => {
   const auth = await resolveAdminAuth(req);
