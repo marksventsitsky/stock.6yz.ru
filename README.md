@@ -41,16 +41,37 @@ npm run dev
 После первого запуска редактируйте каталог через `/b24/admin` — Excel больше не
 нужен как источник истины.
 
-### Docker (за системным nginx)
+### Docker (за системным nginx, деплой на сервере)
+
+Репозиторий склонирован прямо на сервер в `/opt/stock.6yz.ru` (см. `restb24.6yz.ru`
+для образца этого же паттерна):
 
 ```bash
+ssh -p 13609 root@80.78.242.60
+cd /opt/stock.6yz.ru
+git pull
+cp .env.example .env   # один раз — затем заполнить реальными значениями
 docker compose up -d --build
+docker exec b24-stock-promo node dist/scripts/seedCatalog.js   # один раз, при первом деплое
 ```
 
-```nginx
-location / {
-  proxy_pass http://127.0.0.1:8788;
-}
+nginx-конфиг лежит в `nginx/stock.6yz.ru.conf`, разложен так же, как у
+`restb24.6yz.ru`:
+
+```bash
+ln -sf /opt/stock.6yz.ru/nginx/stock.6yz.ru.conf /etc/nginx/sites-available/stock.6yz.ru
+ln -sf ../sites-available/stock.6yz.ru /etc/nginx/sites-enabled/stock.6yz.ru
+nginx -t && systemctl reload nginx
+```
+
+Сейчас (2026-07-08) конфиг **только HTTP** — DNS-запись `stock.6yz.ru` ещё не
+резолвится ни на публичных резолверах, ни на авторитетных NS Yandex. Как только
+она поднимется, выпустить сертификат и переключить на HTTPS:
+
+```bash
+certbot certonly --webroot -w /var/www/certbot -d stock.6yz.ru
+# затем добавить в конфиг блок `listen 443 ssl` с сертификатом (по образцу restb24.6yz.ru)
+# и поменять PUBLIC_BASE_URL / B24_REDIRECT_URI в .env на https://stock.6yz.ru
 ```
 
 ### Environment
