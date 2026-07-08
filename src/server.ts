@@ -98,8 +98,14 @@ function parsePlacementOptions(req: express.Request): Record<string, unknown> {
   return {};
 }
 
-// Bitrix24 CRM_DEAL_DETAIL_TAB / CRM_LEAD_DETAIL_TAB placement handler: the "Акции" tab.
-app.all("/b24/promo-tab", (req, res) => {
+const RESTRICTED_PIPELINE_HTML = `<!doctype html>
+<html lang="ru"><body style="font:14px sans-serif;padding:16px;color:#6b7280;">
+Вкладка «Акции» пока доступна только для сделок в воронке «Продажи».
+</body></html>`;
+
+// Bitrix24 CRM_DEAL_DETAIL_TAB placement handler: the "Акции" tab.
+// Deals only for now, and only within the "Продажи" pipeline (CATEGORY_ID 0).
+app.all("/b24/promo-tab", async (req, res) => {
   const merged = { ...req.query, ...req.body } as Record<string, unknown>;
   const { domain, memberId, authId, refreshId } = captureAuthFromRequest(merged);
   const lang = String(merged.LANG ?? "ru");
@@ -109,6 +115,21 @@ app.all("/b24/promo-tab", (req, res) => {
   const placementOptions = parsePlacementOptions(req);
   const entityId =
     Number(placementOptions.ID ?? placementOptions.ENTITY_VALUE_ID ?? placementOptions.ENTITY_ID ?? 0) || 0;
+
+  if (entityType === "DEAL" && entityId && domain && authId) {
+    const dealRes = await callB24<{ CATEGORY_ID?: string }>(db, {
+      domain,
+      memberId,
+      accessToken: authId,
+      method: "crm.deal.get",
+      body: { id: entityId },
+    });
+    const categoryId = dealRes.ok ? Number(dealRes.result.CATEGORY_ID ?? 0) : 0;
+    if (categoryId !== 0) {
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      return res.send(RESTRICTED_PIPELINE_HTML);
+    }
+  }
 
   const today = new Date().toISOString().slice(0, 10);
   const catalog = listPromotions(db).filter((p) => promoIsActiveToday(p, today));

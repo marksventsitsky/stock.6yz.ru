@@ -96,15 +96,6 @@ export async function setupPromoFields(
   });
   if (!isDuplicateOk(dealTab)) return dealTab;
 
-  const leadTab = await ensurePlacement(db, {
-    domain: params.domain,
-    memberId: params.memberId,
-    accessToken: params.accessToken,
-    placement: "CRM_LEAD_DETAIL_TAB",
-    handlerUrl,
-  });
-  if (!isDuplicateOk(leadTab)) return leadTab;
-
   // Bitrix uses the same UF_CRM_ namespace for every CRM entity, so one set of short field
   // names produces identical field codes on both the deal and the lead.
   const codes = params.codes;
@@ -114,7 +105,8 @@ export async function setupPromoFields(
   const typeShort = codes.typeField.replace(/^UF_CRM_/, "");
   const nameShort = codes.nameField.replace(/^UF_CRM_/, "");
 
-  for (const entity of ["deal", "lead"] as const) {
+  // Only deals for now (sales pipeline "Продажи", category 0) — leads aren't wired up yet.
+  for (const entity of ["deal"] as const) {
     // 1) Plain (non-custom-type) string field: stores the full JSON snapshot for audit/history.
     //    Edited only through our own "Акции" tab (placement above), not inline on the card.
     const jsonRes = await ensureField(db, {
