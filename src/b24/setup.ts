@@ -16,11 +16,15 @@ export type FieldCodes = {
 const USER_TYPE_ID = "promo_selector";
 
 const DUPLICATE_ERRORS = new Set(["ERROR_FIELD_NAME", "ERROR_DUPLICATE", "ERROR_USER_TYPE_ID"]);
+const DUPLICATE_PHRASES = ["already binded", "already exists", "уже существует"];
 
 function isDuplicateOk(res: { ok: true } | { ok: false; error: string; errorDescription?: string }): boolean {
   if (res.ok) return true;
   if (DUPLICATE_ERRORS.has(res.error)) return true;
-  return String(res.errorDescription ?? "").toLowerCase().includes("already binded");
+  // Some portals report an existing field/type via a generic ERROR_CORE + a localized message
+  // ("... уже существует") rather than a specific error code — treat those as already-registered.
+  const desc = String(res.errorDescription ?? "").toLowerCase();
+  return DUPLICATE_PHRASES.some((p) => desc.includes(p));
 }
 
 /**
