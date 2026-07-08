@@ -257,6 +257,10 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
           appEl.querySelectorAll("button[data-act='remove']").forEach((el) => {
             el.addEventListener("click", (e) => removeSelected(Number(e.currentTarget.getAttribute("data-idx"))));
           });
+
+          // Shrink the Bitrix field iframe to our actual content instead of leaving a tall
+          // empty box under the widget.
+          try { if (window.BX24 && BX24.fitWindow) BX24.fitWindow(); } catch {}
         }
 
         render();

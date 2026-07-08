@@ -108,6 +108,8 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
         let tab = "catalog"; // catalog | access | directories
         let filterText = "";
         let statusFilter = "";
+        let cityFilter = "";
+        let brandFilter = "";
         const dirtyRows = new Set();
         let drawerRowKey = null;
         let drawerDraft = null;
@@ -251,7 +253,11 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           const a = auth();
           try {
             const res = await api("/api/admin/access/search", { method: "POST", body: { ...a, query: accessQuery } });
-            userSearchResults = res.users || [];
+            let users = res.users || [];
+            // Bitrix user.search sometimes ignores FIND and returns everyone — filter client-side too.
+            const q = (accessQuery || "").trim().toLowerCase();
+            if (q) users = users.filter((u) => String(u.name || "").toLowerCase().indexOf(q) !== -1);
+            userSearchResults = users;
             render();
           } catch (e) { setStatus("error", "Ошибка поиска: " + (e && e.message ? e.message : String(e))); }
         }
@@ -403,6 +409,11 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
 
         function matchesFilter(r) {
           if (statusFilter && computeStatus(r).kind !== statusFilter) return false;
+          if (brandFilter && r.brand !== brandFilter) return false;
+          if (cityFilter) {
+            const cs = r.cities || [];
+            if (cs.indexOf(cityFilter) === -1 && cs.indexOf("Все") === -1) return false;
+          }
           if (!filterText) return true;
           const q = filterText.toLowerCase();
           const hay = [r.id, r.brand, r.type, r.title, r.description, (r.cities || []).join(" ")].join(" ").toLowerCase();
@@ -430,7 +441,15 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
 
           return \`
             <div class="toolbar">
-              <input id="filterInput" type="text" class="ds-input" style="width:220px" placeholder="Поиск: бренд, название, город…" value="\${escapeHtml(filterText)}"/>
+              <input id="filterInput" type="text" class="ds-input" style="width:200px" placeholder="Поиск: название, город…" value="\${escapeHtml(filterText)}"/>
+              <select id="brandFilterSel" class="ds-select" style="width:auto">
+                <option value="">Бренд: все</option>
+                \${brandOptions().map((b) => \`<option value="\${escapeHtml(b)}" \${b === brandFilter ? "selected" : ""}>\${escapeHtml(b)}</option>\`).join("")}
+              </select>
+              <select id="cityFilterSel" class="ds-select" style="width:auto">
+                <option value="">Город: все</option>
+                \${cityOptions().map((c) => \`<option value="\${escapeHtml(c)}" \${c === cityFilter ? "selected" : ""}>\${escapeHtml(c)}</option>\`).join("")}
+              </select>
               <select id="statusFilterSel" class="ds-select" style="width:auto">
                 <option value="">Статус: все</option>
                 <option value="active" \${statusFilter === "active" ? "selected" : ""}>Активна</option>
@@ -450,7 +469,8 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
                   <thead>
                     <tr>
                       <th style="width:36px">Вкл</th>
-                      <th style="width:120px">Статус</th>
+                      <th style="width:110px">Статус</th>
+                      <th style="width:130px">Бренд</th>
                       <th>Акция</th>
                       <th style="width:150px">Города</th>
                       <th style="width:120px">С</th>
@@ -459,7 +479,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
                     </tr>
                   </thead>
                   <tbody>
-                    \${visible.map((r) => catalogRowHtml(r)).join("") || '<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--text-muted)">Ничего не найдено</td></tr>'}
+                    \${visible.map((r) => catalogRowHtml(r)).join("") || '<tr><td colspan="8" style="padding:24px;text-align:center;color:var(--text-muted)">Ничего не найдено</td></tr>'}
                   </tbody>
                 </table>
               </div>
@@ -484,11 +504,12 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           const isDirty = dirtyRows.has(key);
           const isSelected = drawerRowKey === key;
           const status = computeStatus(r);
-          const meta = [r.brand, r.type, r.department].filter(Boolean).join(" · ");
+          const meta = [r.type, r.department].filter(Boolean).join(" · ");
           return \`
             <tr class="\${isDirty ? "dirty" : ""} \${isSelected ? "selected" : ""}" data-key="\${escapeHtml(key)}">
               <td><span class="ds-switch \${r.active ? "on" : ""}" data-act="toggle-active" data-key="\${escapeHtml(key)}"><span class="knob"></span></span></td>
               <td>\${statusPillHtml(status)}\${isDirty ? '<div class="ds-mono">не сохр.</div>' : ""}</td>
+              <td style="font-size:12.5px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">\${escapeHtml(r.brand || "—")}</td>
               <td>
                 <div style="font-size:13px;font-weight:600;color:\${status.kind === "off" || status.kind === "expired" ? "var(--text-secondary)" : "var(--text)"};max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">\${escapeHtml(r.title || "(без названия)")}</div>
                 <div style="font-size:11.5px;color:var(--text-secondary);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">\${meta ? escapeHtml(meta) : '<span class="ds-muted" style="font-style:italic">без деталей</span>'}</div>
@@ -604,6 +625,10 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           }
           const statusFilterSel = document.getElementById("statusFilterSel");
           if (statusFilterSel) statusFilterSel.addEventListener("change", (e) => { statusFilter = e.target.value; render(); });
+          const brandFilterSel = document.getElementById("brandFilterSel");
+          if (brandFilterSel) brandFilterSel.addEventListener("change", (e) => { brandFilter = e.target.value; render(); });
+          const cityFilterSel = document.getElementById("cityFilterSel");
+          if (cityFilterSel) cityFilterSel.addEventListener("change", (e) => { cityFilter = e.target.value; render(); });
 
           const resyncBtn = document.getElementById("resyncBtn");
           if (resyncBtn) resyncBtn.addEventListener("click", resyncFields);
@@ -734,9 +759,12 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
 
         function wireAccessTab() {
           const accessQueryEl = document.getElementById("accessQuery");
-          if (accessQueryEl) accessQueryEl.addEventListener("change", (e) => { accessQuery = e.target.value; });
+          if (accessQueryEl) {
+            accessQueryEl.addEventListener("input", (e) => { accessQuery = e.target.value; });
+            accessQueryEl.addEventListener("keydown", (e) => { if (e.key === "Enter") { accessQuery = e.target.value; searchUsers(); } });
+          }
           const accessSearchBtn = document.getElementById("accessSearchBtn");
-          if (accessSearchBtn) accessSearchBtn.addEventListener("click", searchUsers);
+          if (accessSearchBtn) accessSearchBtn.addEventListener("click", () => { const el = document.getElementById("accessQuery"); if (el) accessQuery = el.value; searchUsers(); });
           appEl.querySelectorAll(".add-access-btn").forEach((el) => el.addEventListener("click", (e) => addAccessUser(Number(e.currentTarget.getAttribute("data-uid")), e.currentTarget.getAttribute("data-name"))));
           appEl.querySelectorAll(".remove-access-btn").forEach((el) => el.addEventListener("click", (e) => removeAccessUser(Number(e.currentTarget.getAttribute("data-uid")))));
         }
