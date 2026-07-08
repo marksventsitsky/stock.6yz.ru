@@ -62,5 +62,15 @@ function migrate(db: Db) {
       updated_at_ms INTEGER NOT NULL,
       PRIMARY KEY (member_id, entity_type, field_code, value_text)
     );
+
+    -- Named Bitrix24 users granted access to /b24/admin without being full portal admins.
+    -- Only true portal admins (checked via user.admin) can add/remove entries here.
+    CREATE TABLE IF NOT EXISTS admin_users (
+      member_id TEXT NOT NULL,
+      user_id INTEGER NOT NULL,
+      name TEXT NOT NULL DEFAULT '',
+      added_at_ms INTEGER NOT NULL,
+      PRIMARY KEY (member_id, user_id)
+    );
   `);
 }

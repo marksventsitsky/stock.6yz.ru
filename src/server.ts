@@ -3,10 +3,14 @@ import express from "express";
 import { z } from "zod";
 import { openDb } from "./storage/db.js";
 import {
+  addAdminUser,
   deletePromotion,
   getPortalAuth,
   getSelection,
+  isAdminUserAllowed,
+  listAdminUsers,
   listPromotions,
+  removeAdminUser,
   upsertPortalAuth,
   upsertPromotion,
   upsertSelection,
@@ -16,7 +20,7 @@ import { renderPromoWidgetPage } from "./web/promoWidgetPage.js";
 import { renderAdminPage } from "./web/adminPage.js";
 import { setupPromoFields, catalogFacets, type FieldCodes } from "./b24/setup.js";
 import { resolveEnumIds, ensureEnumHasValues } from "./b24/enumSync.js";
-import { checkIsAdmin } from "./b24/adminAuth.js";
+import { checkIsAdmin, searchPortalUsers } from "./b24/adminAuth.js";
 import { exchangeCodeForToken } from "./b24/oauth.js";
 import { callB24 } from "./b24/rest.js";
 
@@ -276,28 +280,72 @@ const AuthBodySchema = z.object({
   memberId: z.string().min(1),
   domain: z.string().optional().default(""),
   accessToken: z.string().optional().default(""),
+  userId: z.number().optional().default(0),
 });
 
-async function resolveAdminAuth(
-  req: express.Request,
-): Promise<{ ok: boolean; domain: string; memberId: string; accessToken: string }> {
+type AdminAuth = {
+  ok: boolean; // allowed to use the catalog CRUD (portal admin OR on the allowlist)
+  isPortalAdmin: boolean; // allowed to manage the allowlist itself
+  domain: string;
+  memberId: string;
+  accessToken: string;
+  userId: number;
+};
+
+async function resolveAdminAuth(req: express.Request): Promise<AdminAuth> {
   const parsed = AuthBodySchema.safeParse(req.body);
   const memberId = parsed.success ? parsed.data.memberId : "";
   const stored = memberId ? getPortalAuth(db, memberId) : null;
   const domain = (parsed.success && parsed.data.domain) || stored?.domain || "";
   const accessToken = (parsed.success && parsed.data.accessToken) || stored?.accessToken || "";
+  const userId = parsed.success ? parsed.data.userId : 0;
 
   const secretHeader = String(req.header("x-admin-secret") || "");
   if (ADMIN_SECRET && secretHeader === ADMIN_SECRET) {
-    return { ok: true, domain, memberId, accessToken };
+    return { ok: true, isPortalAdmin: true, domain, memberId, accessToken, userId };
   }
-  const isAdmin = await checkIsAdmin(db, { domain, memberId, accessToken });
-  return { ok: isAdmin, domain, memberId, accessToken };
+  const isPortalAdmin = await checkIsAdmin(db, { domain, memberId, accessToken });
+  const isAllowedUser = !isPortalAdmin && userId > 0 && isAdminUserAllowed(db, memberId, userId);
+  return { ok: isPortalAdmin || isAllowedUser, isPortalAdmin, domain, memberId, accessToken, userId };
 }
 
 app.post("/api/admin/whoami", async (req, res) => {
   const auth = await resolveAdminAuth(req);
-  return res.json({ ok: true, isAdmin: auth.ok });
+  return res.json({ ok: true, isAdmin: auth.ok, isPortalAdmin: auth.isPortalAdmin });
+});
+
+app.post("/api/admin/access/list", async (req, res) => {
+  const auth = await resolveAdminAuth(req);
+  if (!auth.isPortalAdmin) return res.status(403).json({ error: "forbidden" });
+  return res.json({ ok: true, items: listAdminUsers(db, auth.memberId) });
+});
+
+app.post("/api/admin/access/search", async (req, res) => {
+  const auth = await resolveAdminAuth(req);
+  if (!auth.isPortalAdmin) return res.status(403).json({ error: "forbidden" });
+  if (!auth.domain || !auth.accessToken) return res.status(400).json({ error: "missing_access_token" });
+  const query = String(req.body?.query || "");
+  const users = await searchPortalUsers(db, { domain: auth.domain, memberId: auth.memberId, accessToken: auth.accessToken, query });
+  return res.json({ ok: true, users });
+});
+
+app.post("/api/admin/access/add", async (req, res) => {
+  const auth = await resolveAdminAuth(req);
+  if (!auth.isPortalAdmin) return res.status(403).json({ error: "forbidden" });
+  const userId = Number(req.body?.userId || 0);
+  const name = String(req.body?.name || "");
+  if (!userId) return res.status(400).json({ error: "missing_user_id" });
+  addAdminUser(db, auth.memberId, userId, name);
+  return res.json({ ok: true });
+});
+
+app.post("/api/admin/access/remove", async (req, res) => {
+  const auth = await resolveAdminAuth(req);
+  if (!auth.isPortalAdmin) return res.status(403).json({ error: "forbidden" });
+  const userId = Number(req.body?.userId || 0);
+  if (!userId) return res.status(400).json({ error: "missing_user_id" });
+  removeAdminUser(db, auth.memberId, userId);
+  return res.json({ ok: true });
 });
 
 app.post("/api/admin/catalog", async (req, res) => {

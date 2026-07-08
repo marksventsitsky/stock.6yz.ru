@@ -196,3 +196,33 @@ export function getSelection(db: Db, memberId: string, entityType: "DEAL" | "LEA
   if (!row) return null;
   return JSON.parse(row.selection_json) as Selection;
 }
+
+export type AdminUser = { userId: number; name: string; addedAtMs: number };
+
+export function listAdminUsers(db: Db, memberId: string): AdminUser[] {
+  const rows = db
+    .prepare(`SELECT user_id, name, added_at_ms FROM admin_users WHERE member_id = ? ORDER BY added_at_ms DESC`)
+    .all(memberId) as Array<{ user_id: number; name: string; added_at_ms: number }>;
+  return rows.map((r) => ({ userId: r.user_id, name: r.name, addedAtMs: r.added_at_ms }));
+}
+
+export function isAdminUserAllowed(db: Db, memberId: string, userId: number): boolean {
+  const row = db
+    .prepare(`SELECT 1 FROM admin_users WHERE member_id = ? AND user_id = ?`)
+    .get(memberId, userId) as unknown;
+  return !!row;
+}
+
+export function addAdminUser(db: Db, memberId: string, userId: number, name: string) {
+  db.prepare(
+    `
+    INSERT INTO admin_users (member_id, user_id, name, added_at_ms)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(member_id, user_id) DO UPDATE SET name=excluded.name
+  `,
+  ).run(memberId, userId, name, Date.now());
+}
+
+export function removeAdminUser(db: Db, memberId: string, userId: number) {
+  db.prepare(`DELETE FROM admin_users WHERE member_id = ? AND user_id = ?`).run(memberId, userId);
+}

@@ -66,7 +66,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
         window.addEventListener("unhandledrejection", (ev) => { try { showFatal("Unhandled rejection", (ev.reason && ev.reason.stack) || String(ev.reason)); } catch {} });
 
         function auth() {
-          let authId = BOOTSTRAP.authId, domain = BOOTSTRAP.domain, memberId = BOOTSTRAP.memberId;
+          let authId = BOOTSTRAP.authId, domain = BOOTSTRAP.domain, memberId = BOOTSTRAP.memberId, userId = 0;
           try {
             if (window.BX24 && BX24.getAuth) {
               const a = BX24.getAuth();
@@ -74,14 +74,18 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
                 authId = a.access_token || authId;
                 domain = a.domain || domain;
                 memberId = a.member_id || memberId;
+                userId = Number(a.user_id || a.USER_ID || a.USERID || 0) || 0;
               }
             }
           } catch {}
-          return { memberId, domain, accessToken: authId };
+          return { memberId, domain, accessToken: authId, userId };
         }
 
         let catalog = [];
         let isAdmin = false;
+        let isPortalAdmin = false;
+        let accessUsers = [];
+        let userSearchResults = [];
         let statusText = "", statusKind = "";
 
         function setStatus(kind, text) { statusKind = kind; statusText = text || ""; render(); }
@@ -103,11 +107,56 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           try {
             const check = await api("/api/admin/whoami", { method: "POST", body: a });
             isAdmin = !!check.isAdmin;
+            isPortalAdmin = !!check.isPortalAdmin;
             const list = await api("/api/admin/catalog", { method: "POST", body: a });
             catalog = list.items || [];
+            if (isPortalAdmin) {
+              const acc = await api("/api/admin/access/list", { method: "POST", body: a });
+              accessUsers = acc.items || [];
+            }
             setStatus("", "");
           } catch (e) {
             setStatus("error", "Ошибка загрузки: " + (e && e.message ? e.message : String(e)));
+          }
+        }
+
+        let accessQuery = "";
+
+        async function searchUsers() {
+          const a = auth();
+          try {
+            const res = await api("/api/admin/access/search", { method: "POST", body: { ...a, query: accessQuery } });
+            userSearchResults = res.users || [];
+            render();
+          } catch (e) {
+            setStatus("error", "Ошибка поиска: " + (e && e.message ? e.message : String(e)));
+          }
+        }
+
+        async function addAccessUser(userId, name) {
+          const a = auth();
+          setStatus("muted", "Добавление доступа…");
+          try {
+            await api("/api/admin/access/add", { method: "POST", body: { ...a, userId, name } });
+            userSearchResults = [];
+            accessQuery = "";
+            setStatus("ok", "Доступ выдан");
+            await loadAll();
+          } catch (e) {
+            setStatus("error", "Ошибка: " + (e && e.message ? e.message : String(e)));
+          }
+        }
+
+        async function removeAccessUser(userId) {
+          if (!confirm("Забрать доступ у этого пользователя?")) return;
+          const a = auth();
+          setStatus("muted", "Удаление доступа…");
+          try {
+            await api("/api/admin/access/remove", { method: "POST", body: { ...a, userId } });
+            setStatus("ok", "Доступ отозван");
+            await loadAll();
+          } catch (e) {
+            setStatus("error", "Ошибка: " + (e && e.message ? e.message : String(e)));
           }
         }
 
@@ -171,14 +220,35 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           const statusHtml = statusText ? '<div class="' + (statusKind === "error" ? "error" : statusKind === "ok" ? "ok" : "muted") + '">' + escapeHtml(statusText) + "</div>" : "";
 
           if (!isAdmin) {
-            appEl.innerHTML = '<h1>Акции — админка</h1><div class="error">Доступ только для администраторов портала Bitrix24.</div>' + statusHtml;
+            appEl.innerHTML = '<h1>Акции — админка</h1><div class="error">У вас нет доступа к этому разделу. Обратитесь к администратору портала, чтобы он выдал вам доступ.</div>' + statusHtml;
             return;
           }
 
           const rows = draftNewRow ? catalog.concat([draftNewRow]) : catalog;
 
+          const accessHtml = isPortalAdmin ? \`
+            <div class="panel" style="border:1px solid #e5e7eb;border-radius:10px;padding:10px;margin-bottom:12px;background:#fff;">
+              <h3 style="margin:0 0 8px 0;font-size:13px;">Доступ к админке (кроме администраторов портала)</h3>
+              <div class="bar">
+                <input type="text" id="accessQuery" placeholder="Имя или email сотрудника…" style="max-width:260px;" value="\${escapeHtml(accessQuery)}"/>
+                <button id="accessSearchBtn" type="button">Найти</button>
+              </div>
+              \${userSearchResults.length ? '<div class="muted" style="margin:6px 0;">Результаты поиска:</div><div class="bar">' +
+                userSearchResults.map((u) => '<button type="button" class="add-access-btn" data-uid="' + u.userId + '" data-name="' + escapeHtml(u.name) + '">+ ' + escapeHtml(u.name) + '</button>').join("") +
+                '</div>' : ""}
+              <table style="margin-top:8px;">
+                <thead><tr><th>Пользователь</th><th style="width:80px;">ID</th><th style="width:60px;"></th></tr></thead>
+                <tbody>
+                  \${accessUsers.length ? accessUsers.map((u) => \`
+                    <tr><td>\${escapeHtml(u.name)}</td><td>\${u.userId}</td><td><button type="button" class="danger remove-access-btn" data-uid="\${u.userId}">✕</button></td></tr>
+                  \`).join("") : '<tr><td colspan="3" class="muted">Пока никому, кроме админов портала, доступ не выдан.</td></tr>'}
+                </tbody>
+              </table>
+            </div>\` : "";
+
           appEl.innerHTML = \`
             <h1>Каталог акций <span class="badge">\${catalog.length}</span></h1>
+            \${accessHtml}
             <div class="bar">
               <button id="addRowBtn" class="primary" type="button">+ Добавить акцию</button>
               <button id="resyncBtn" type="button">Синхронизировать справочники в Bitrix</button>
@@ -210,6 +280,17 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           document.getElementById("addRowBtn").addEventListener("click", () => { draftNewRow = blankRow(); render(); });
           const resyncBtn = document.getElementById("resyncBtn");
           if (resyncBtn) resyncBtn.addEventListener("click", resyncFields);
+
+          const accessQueryEl = document.getElementById("accessQuery");
+          if (accessQueryEl) accessQueryEl.addEventListener("change", (e) => { accessQuery = e.target.value; });
+          const accessSearchBtn = document.getElementById("accessSearchBtn");
+          if (accessSearchBtn) accessSearchBtn.addEventListener("click", searchUsers);
+          appEl.querySelectorAll(".add-access-btn").forEach((el) => {
+            el.addEventListener("click", (e) => addAccessUser(Number(e.target.getAttribute("data-uid")), e.target.getAttribute("data-name")));
+          });
+          appEl.querySelectorAll(".remove-access-btn").forEach((el) => {
+            el.addEventListener("click", (e) => removeAccessUser(Number(e.target.getAttribute("data-uid"))));
+          });
 
           rows.forEach((r, i) => {
             const prefix = "row" + i + "_";

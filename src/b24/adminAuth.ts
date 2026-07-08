@@ -16,3 +16,27 @@ export async function checkIsAdmin(
   });
   return res.ok && res.result === true;
 }
+
+export type PortalUser = { ID: string; NAME?: string; LAST_NAME?: string; EMAIL?: string; ACTIVE?: boolean };
+
+function formatUserName(u: PortalUser): string {
+  const full = [u.NAME, u.LAST_NAME].filter(Boolean).join(" ").trim();
+  return full || u.EMAIL || `#${u.ID}`;
+}
+
+/** Searches active portal users by name/email so an admin can pick one to grant access to. */
+export async function searchPortalUsers(
+  db: Db,
+  ctx: { domain: string; memberId: string; accessToken: string; query: string },
+): Promise<Array<{ userId: number; name: string }>> {
+  const res = await callB24<PortalUser[]>(db, {
+    domain: ctx.domain,
+    memberId: ctx.memberId,
+    accessToken: ctx.accessToken,
+    method: "user.search",
+    body: { FILTER: { ACTIVE: true }, FIND: ctx.query || undefined },
+  });
+  if (!res.ok) return [];
+  return res.result.map((u) => ({ userId: Number(u.ID), name: formatUserName(u) }));
+}
+
