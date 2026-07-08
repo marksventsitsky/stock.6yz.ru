@@ -21,12 +21,16 @@ async function fetchField(
   db: Db,
   ctx: { domain: string; memberId: string; accessToken: string; entity: EntityKind; fieldCode: string },
 ): Promise<UserFieldListItem | null> {
+  // Callers pass the short field code (e.g. "PROMO_CITY") which is what field CREATION uses,
+  // but Bitrix stores/filters by the full name it prepends ("UF_CRM_PROMO_CITY") — normalize
+  // so the lookup actually matches (otherwise the value->ID mirror never gets populated).
+  const fullName = ctx.fieldCode.startsWith("UF_CRM_") ? ctx.fieldCode : `UF_CRM_${ctx.fieldCode}`;
   const res = await callB24<UserFieldListItem[]>(db, {
     domain: ctx.domain,
     memberId: ctx.memberId,
     accessToken: ctx.accessToken,
     method: listMethod(ctx.entity),
-    body: { filter: { FIELD_NAME: ctx.fieldCode } },
+    body: { filter: { FIELD_NAME: fullName } },
   });
   if (!res.ok || !res.result.length) return null;
   return res.result[0];
