@@ -134,17 +134,13 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
           CATALOG.forEach((p) => { if (isActive(p)) p.cities.forEach((c) => { if (c !== "Все") set.add(c); }); });
           return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
         }
-        function typesForCity(city) {
-          const set = new Set();
-          CATALOG.forEach((p) => { if (isActive(p) && matchesCity(p, city)) set.add(p.type || "Без типа"); });
-          return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
-        }
-        function promosForCityType(city, type) {
-          return CATALOG.filter((p) => isActive(p) && matchesCity(p, city) && (p.type || "Без типа") === type);
+        function promosForCity(city) {
+          return CATALOG.filter((p) => isActive(p) && matchesCity(p, city))
+            .sort((a, b) => String(a.title).localeCompare(String(b.title), "ru"));
         }
 
         let selection = Array.isArray(BOOTSTRAP.initialSelection) ? BOOTSTRAP.initialSelection.slice() : [];
-        let draftCity = "", draftType = "", draftPromoId = "";
+        let draftCity = "", draftPromoId = "";
         let statusKind = "", statusText = "";
 
         function setStatus(kind, text) { statusKind = kind; statusText = text || ""; render(); }
@@ -199,8 +195,7 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
 
         function render() {
           const cities = distinctCities();
-          const types = draftCity ? typesForCity(draftCity) : [];
-          const promos = draftCity && draftType ? promosForCityType(draftCity, draftType) : [];
+          const promos = draftCity ? promosForCity(draftCity) : [];
 
           const listHtml = selection.length
             ? '<div class="sel-list">' + selection.map((s, i) => \`
@@ -231,15 +226,8 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
                 </select>
               </div>
               <div class="fld">
-                <div class="ds-label">Тип</div>
-                <select id="typeSel" class="ds-select" \${draftCity ? "" : "disabled"}>
-                  <option value="">— выберите —</option>
-                  \${types.map((t) => \`<option value="\${escapeHtml(t)}" \${t === draftType ? "selected" : ""}>\${escapeHtml(t)}</option>\`).join("")}
-                </select>
-              </div>
-              <div class="fld">
                 <div class="ds-label">Акция</div>
-                <select id="promoSel" class="ds-select" \${draftType ? "" : "disabled"}>
+                <select id="promoSel" class="ds-select" \${draftCity ? "" : "disabled"}>
                   <option value="">— выберите —</option>
                   \${promos.map((p) => \`<option value="\${escapeHtml(p.id)}" \${p.id === draftPromoId ? "selected" : ""}>\${escapeHtml(p.title)}</option>\`).join("")}
                 </select>
@@ -254,9 +242,7 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
           appEl.innerHTML = addRowHtml + listHtml + hintHtml;
 
           const citySel = document.getElementById("citySel");
-          if (citySel) citySel.addEventListener("change", (e) => { draftCity = e.target.value; draftType = ""; draftPromoId = ""; render(); });
-          const typeSel = document.getElementById("typeSel");
-          if (typeSel) typeSel.addEventListener("change", (e) => { draftType = e.target.value; draftPromoId = ""; render(); });
+          if (citySel) citySel.addEventListener("change", (e) => { draftCity = e.target.value; draftPromoId = ""; render(); });
           const promoSel = document.getElementById("promoSel");
           if (promoSel) promoSel.addEventListener("change", (e) => { draftPromoId = e.target.value; render(); });
           const addBtn = document.getElementById("addBtn");
