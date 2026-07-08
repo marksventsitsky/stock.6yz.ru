@@ -49,12 +49,20 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
     <script src="//api.bitrix24.com/api/v1/dev/"></script>
     <style>
       ${DESIGN_SYSTEM_CSS}
-      body { margin: 0; background: transparent; }
-      .wrap { padding: 8px 2px; }
-      .bar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-      .promo-card { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; }
-      .promo-card + .promo-card { border-top: 1px solid #eef1f3; }
-      .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+      html, body { margin: 0; background: transparent; }
+      .wrap { padding: 2px; }
+      .add-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-bottom: 12px; }
+      .add-row .fld { flex: 1 1 150px; min-width: 0; }
+      .add-row .ds-btn { flex: 0 0 auto; height: 34px; }
+      .sel-list { display: flex; flex-direction: column; gap: 8px; }
+      .sel-row { display: flex; align-items: center; gap: 10px; padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+      .sel-main { flex: 1; min-width: 0; }
+      .sel-title { font-size: 13px; font-weight: 600; color: var(--text); }
+      .sel-meta { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 5px; align-items: center; }
+      .sel-remove { flex: none; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: none; background: none; color: var(--text-muted); cursor: pointer; border-radius: 6px; font-size: 16px; line-height: 1; }
+      .sel-remove:hover { background: var(--danger-bg); color: var(--danger-text); }
+      .empty { padding: 14px; text-align: center; color: var(--text-muted); font-size: 12.5px; border: 1px dashed var(--border-input); border-radius: 8px; }
+      .hint { margin-top: 10px; font-size: 11px; color: var(--text-muted); }
     </style>
   </head>
   <body>
@@ -97,6 +105,16 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
               BX24.placement.call("setValue", value);
             }
           } catch {}
+        }
+
+        // Resize the Bitrix field iframe to fit our content — otherwise Bitrix leaves a tall
+        // empty box below the widget. fitWindow is flaky right after innerHTML changes, so we
+        // retry a couple of times on the next frames.
+        function fitWindow() {
+          const doFit = () => { try { if (window.BX24 && BX24.fitWindow) BX24.fitWindow(); } catch {} };
+          doFit();
+          setTimeout(doFit, 60);
+          setTimeout(doFit, 250);
         }
 
         function isActive(p) {
@@ -184,67 +202,56 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
           const types = draftCity ? typesForCity(draftCity) : [];
           const promos = draftCity && draftType ? promosForCityType(draftCity, draftType) : [];
 
-          const cardsHtml = selection.length
-            ? selection.map((s, i) => \`
-              <div class="promo-card">
-                <div style="flex:1;min-width:0">
-                  <div style="font-size:13px;font-weight:600;color:var(--text)">\${escapeHtml(s.title)}</div>
-                  <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px">
-                    <span class="ds-chip ds-chip-accent">\${escapeHtml(s.city || "—")}</span>
-                    <span class="ds-chip ds-chip-neutral">\${escapeHtml(s.brand || "—")}</span>
-                    <span class="ds-chip ds-chip-neutral">\${escapeHtml(s.type || "—")}</span>
+          const listHtml = selection.length
+            ? '<div class="sel-list">' + selection.map((s, i) => \`
+                <div class="sel-row">
+                  <div class="sel-main">
+                    <div class="sel-title">\${escapeHtml(s.title)}</div>
+                    <div class="sel-meta">
+                      <span class="ds-chip ds-chip-accent">\${escapeHtml(s.city || "—")}</span>
+                      <span class="ds-chip ds-chip-neutral">\${escapeHtml(s.brand || "—")}</span>
+                      <span class="ds-chip ds-chip-neutral">\${escapeHtml(s.type || "—")}</span>
+                    </div>
                   </div>
-                </div>
-                \${canEdit ? '<button type="button" data-act="remove" data-idx="' + i + '" class="ds-btn-danger-text">Удалить</button>' : ""}
-              </div>\`).join("")
-            : '<div style="padding:20px;text-align:center;color:var(--text-muted);border:1px dashed var(--border-input);border-radius:8px">Пока не выбрано ни одной акции</div>';
+                  \${canEdit ? '<button type="button" class="sel-remove" data-act="remove" data-idx="' + i + '" title="Убрать">×</button>' : ""}
+                </div>\`).join("") + '</div>'
+            : '<div class="empty">Акции не выбраны</div>';
 
           const statusHtml = statusText
-            ? '<div style="margin-top:10px;font-size:12.5px;color:' + (statusKind === "error" ? "var(--danger-text)" : statusKind === "ok" ? "var(--success)" : "var(--text-secondary)") + '">' + escapeHtml(statusText) + "</div>"
+            ? '<span style="font-size:11px;color:' + (statusKind === "error" ? "var(--danger-text)" : statusKind === "ok" ? "var(--success)" : "var(--text-muted)") + '">' + escapeHtml(statusText) + "</span>"
             : "";
 
-          const addPanelHtml = canEdit ? \`
-            <div class="ds-card" style="padding:14px;margin-bottom:12px">
-              <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px">Добавить акцию</div>
-              <div class="grid3">
-                <div>
-                  <div class="ds-label">Направление (город)</div>
-                  <select id="citySel" class="ds-select">
-                    <option value="">— выберите —</option>
-                    \${cities.map((c) => \`<option value="\${escapeHtml(c)}" \${c === draftCity ? "selected" : ""}>\${escapeHtml(c)}</option>\`).join("")}
-                  </select>
-                </div>
-                <div>
-                  <div class="ds-label">Тип акции</div>
-                  <select id="typeSel" class="ds-select" \${draftCity ? "" : "disabled"}>
-                    <option value="">— выберите —</option>
-                    \${types.map((t) => \`<option value="\${escapeHtml(t)}" \${t === draftType ? "selected" : ""}>\${escapeHtml(t)}</option>\`).join("")}
-                  </select>
-                </div>
-                <div>
-                  <div class="ds-label">Акция</div>
-                  <select id="promoSel" class="ds-select" \${draftType ? "" : "disabled"}>
-                    <option value="">— выберите —</option>
-                    \${promos.map((p) => \`<option value="\${escapeHtml(p.id)}" \${p.id === draftPromoId ? "selected" : ""}>\${escapeHtml(p.title)}</option>\`).join("")}
-                  </select>
-                </div>
+          const addRowHtml = canEdit ? \`
+            <div class="add-row">
+              <div class="fld">
+                <div class="ds-label">Город</div>
+                <select id="citySel" class="ds-select">
+                  <option value="">— выберите —</option>
+                  \${cities.map((c) => \`<option value="\${escapeHtml(c)}" \${c === draftCity ? "selected" : ""}>\${escapeHtml(c)}</option>\`).join("")}
+                </select>
               </div>
-              <button id="addBtn" type="button" class="ds-btn ds-btn-outline" style="margin-top:10px" \${draftPromoId ? "" : "disabled"}>+ Добавить в список</button>
+              <div class="fld">
+                <div class="ds-label">Тип</div>
+                <select id="typeSel" class="ds-select" \${draftCity ? "" : "disabled"}>
+                  <option value="">— выберите —</option>
+                  \${types.map((t) => \`<option value="\${escapeHtml(t)}" \${t === draftType ? "selected" : ""}>\${escapeHtml(t)}</option>\`).join("")}
+                </select>
+              </div>
+              <div class="fld">
+                <div class="ds-label">Акция</div>
+                <select id="promoSel" class="ds-select" \${draftType ? "" : "disabled"}>
+                  <option value="">— выберите —</option>
+                  \${promos.map((p) => \`<option value="\${escapeHtml(p.id)}" \${p.id === draftPromoId ? "selected" : ""}>\${escapeHtml(p.title)}</option>\`).join("")}
+                </select>
+              </div>
+              <button id="addBtn" type="button" class="ds-btn ds-btn-primary" \${draftPromoId ? "" : "disabled"}>Добавить</button>
             </div>\` : "";
 
-          const saveBarHtml = canEdit ? \`
-            <div style="display:flex;align-items:center;gap:12px">
-              \${entityId
-                ? '<span style="font-size:11px;color:var(--text-muted)">Изменения сохраняются автоматически.</span>'
-                : '<span style="font-size:11px;color:var(--text-muted)">Сохранится вместе со сделкой после первого сохранения.</span>'}
-              \${statusHtml}
-            </div>\` : statusHtml;
+          const hintHtml = canEdit
+            ? '<div class="hint">' + (entityId ? "Изменения сохраняются автоматически. " : "Сохранится вместе со сделкой. ") + statusHtml + "</div>"
+            : (statusHtml ? '<div class="hint">' + statusHtml + "</div>" : "");
 
-          appEl.innerHTML = \`
-            <div class="ds-card" style="margin-bottom:12px;overflow:hidden">\${cardsHtml}</div>
-            \${addPanelHtml}
-            \${saveBarHtml}
-          \`;
+          appEl.innerHTML = addRowHtml + listHtml + hintHtml;
 
           const citySel = document.getElementById("citySel");
           if (citySel) citySel.addEventListener("change", (e) => { draftCity = e.target.value; draftType = ""; draftPromoId = ""; render(); });
@@ -258,13 +265,18 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
             el.addEventListener("click", (e) => removeSelected(Number(e.currentTarget.getAttribute("data-idx"))));
           });
 
-          // Shrink the Bitrix field iframe to our actual content instead of leaving a tall
-          // empty box under the widget.
-          try { if (window.BX24 && BX24.fitWindow) BX24.fitWindow(); } catch {}
+          fitWindow();
         }
 
-        render();
-        setFieldValue();
+        function boot() {
+          render();
+          setFieldValue();
+          fitWindow();
+        }
+
+        // Init the BX24 SDK first so placement.call / fitWindow are available, then render.
+        if (window.BX24 && BX24.init) { try { BX24.init(boot); } catch { boot(); } }
+        else boot();
       })();
     </script>
   </body>
