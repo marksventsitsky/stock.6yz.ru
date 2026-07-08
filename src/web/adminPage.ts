@@ -384,14 +384,17 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
             ? '<div style="padding:8px 16px;font-size:12.5px;color:' + (statusKind === "error" ? "var(--danger-text)" : statusKind === "ok" ? "var(--success)" : "var(--text-secondary)") + '">' + escapeHtml(statusText) + "</div>"
             : "";
 
-          const tabsHtml = isPortalAdmin
-            ? '<div class="ds-tabbar">' + tabHtml("catalog", "Каталог акций", catalog.length) + tabHtml("access", "Доступ") + tabHtml("directories", "Справочники") + '</div>'
-            : "";
+          const archiveCount = catalog.filter((r) => computeStatus(r).kind === "expired").length;
+          const activeCount = catalog.length - archiveCount;
+          let tabsHtml = '<div class="ds-tabbar">' + tabHtml("catalog", "Каталог акций", activeCount) + tabHtml("archive", "Архив", archiveCount);
+          if (isPortalAdmin) tabsHtml += tabHtml("access", "Доступ") + tabHtml("directories", "Справочники");
+          tabsHtml += "</div>";
 
           let bodyHtml = "";
           if (tab === "access" && isPortalAdmin) bodyHtml = accessTabHtml();
           else if (tab === "directories" && isPortalAdmin) bodyHtml = directoriesTabHtml();
-          else bodyHtml = catalogTabHtml();
+          else if (tab === "archive") bodyHtml = catalogTabHtml(true);
+          else bodyHtml = catalogTabHtml(false);
 
           appEl.innerHTML = \`
             <div class="ds-card" style="overflow:hidden">
@@ -408,7 +411,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
         }
 
         function matchesFilter(r) {
-          if (statusFilter && computeStatus(r).kind !== statusFilter) return false;
+          if (tab !== "archive" && statusFilter && computeStatus(r).kind !== statusFilter) return false;
           if (brandFilter && r.brand !== brandFilter) return false;
           if (cityFilter) {
             const cs = r.cities || [];
@@ -433,11 +436,23 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           return shown + rest;
         }
 
-        function catalogTabHtml() {
-          const visible = catalog.filter(matchesFilter);
+        function catalogTabHtml(archived) {
+          // Archive tab = expired promos only; main catalog = everything else.
+          const base = catalog.filter((r) => (computeStatus(r).kind === "expired") === !!archived);
+          const visible = base.filter(matchesFilter);
           const dirtyCount = dirtyRows.size;
 
           const drawerHtml = drawerDraft ? drawerHtmlFor(drawerDraft) : "";
+
+          // Status filter only makes sense in the main catalog (archive is all-expired).
+          const statusFilterHtml = archived ? "" : \`
+              <select id="statusFilterSel" class="ds-select" style="width:auto">
+                <option value="">Статус: все</option>
+                <option value="active" \${statusFilter === "active" ? "selected" : ""}>Активна</option>
+                <option value="permanent" \${statusFilter === "permanent" ? "selected" : ""}>Бессрочная</option>
+                <option value="expiring" \${statusFilter === "expiring" ? "selected" : ""}>Истекает</option>
+                <option value="off" \${statusFilter === "off" ? "selected" : ""}>Выключена</option>
+              </select>\`;
 
           return \`
             <div class="toolbar">
@@ -450,17 +465,10 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
                 <option value="">Город: все</option>
                 \${cityOptions().map((c) => \`<option value="\${escapeHtml(c)}" \${c === cityFilter ? "selected" : ""}>\${escapeHtml(c)}</option>\`).join("")}
               </select>
-              <select id="statusFilterSel" class="ds-select" style="width:auto">
-                <option value="">Статус: все</option>
-                <option value="active" \${statusFilter === "active" ? "selected" : ""}>Активна</option>
-                <option value="permanent" \${statusFilter === "permanent" ? "selected" : ""}>Бессрочная</option>
-                <option value="expiring" \${statusFilter === "expiring" ? "selected" : ""}>Истекает</option>
-                <option value="expired" \${statusFilter === "expired" ? "selected" : ""}>Истекла</option>
-                <option value="off" \${statusFilter === "off" ? "selected" : ""}>Выключена</option>
-              </select>
+              \${statusFilterHtml}
               <div style="flex:1"></div>
-              <button id="resyncBtn" type="button" class="ds-btn ds-btn-plain">Синхронизировать справочники</button>
-              <button id="addRowBtn" type="button" class="ds-btn ds-btn-outline">+ Акция</button>
+              \${archived ? "" : '<button id="resyncBtn" type="button" class="ds-btn ds-btn-plain">Синхронизировать справочники</button>'}
+              \${archived ? "" : '<button id="addRowBtn" type="button" class="ds-btn ds-btn-outline">+ Акция</button>'}
               <button id="saveAllBtn" type="button" class="ds-btn ds-btn-primary" \${dirtyCount ? "" : "disabled"}>Сохранить \${dirtyCount ? '<span class="ds-btn-badge">' + dirtyCount + '</span>' : ""}</button>
             </div>
             <div class="split">
@@ -495,7 +503,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
                 <button id="saveAllBtn2" type="button" class="ds-btn ds-btn-primary">Сохранить \${dirtyCount}</button>
               </div>
             \` : ""}
-            <div style="padding:8px 16px;font-size:11.5px;color:var(--text-muted)">Показано \${visible.length} из \${catalog.length}</div>
+            <div style="padding:8px 16px;font-size:11.5px;color:var(--text-muted)">Показано \${visible.length} из \${base.length}\${archived ? "" : " · истёкшие — во вкладке «Архив»"}</div>
           \`;
         }
 
