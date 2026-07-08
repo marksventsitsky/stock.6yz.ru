@@ -456,7 +456,7 @@ app.post("/api/admin/resync-fields", async (req, res) => {
   return res.json({ ok: true, result });
 });
 
-const DIRECTORY_KINDS = new Set(["city", "direction", "placement"]);
+const DIRECTORY_KINDS = new Set(["city", "direction", "placement", "type"]);
 function directorySettingKeys(kind: string) {
   return { typeKey: `${kind}_list_iblock_type_id`, idKey: `${kind}_list_iblock_id` };
 }
@@ -481,7 +481,7 @@ app.post("/api/admin/directory/config", async (req, res) => {
     ok: true,
     iblockTypeId: getSetting(db, auth.memberId, typeKey),
     iblockId: getSetting(db, auth.memberId, idKey),
-    entries: listDirectory(db, auth.memberId, kind as "city" | "direction" | "placement"),
+    entries: listDirectory(db, auth.memberId, kind as "city" | "direction" | "placement" | "type"),
   });
 });
 
@@ -493,7 +493,7 @@ app.post("/api/admin/directory/add-manual", async (req, res) => {
   const name = String(req.body?.name || "").trim();
   if (!DIRECTORY_KINDS.has(kind)) return res.status(400).json({ error: "invalid_kind" });
   if (!name) return res.status(400).json({ error: "missing_name" });
-  addManualDirectoryEntry(db, auth.memberId, kind as "city" | "direction" | "placement", name);
+  addManualDirectoryEntry(db, auth.memberId, kind as "city" | "direction" | "placement" | "type", name);
   return res.json({ ok: true });
 });
 
@@ -504,7 +504,7 @@ app.post("/api/admin/directory/remove-manual", async (req, res) => {
   const externalId = String(req.body?.externalId || "");
   if (!DIRECTORY_KINDS.has(kind)) return res.status(400).json({ error: "invalid_kind" });
   if (!externalId) return res.status(400).json({ error: "missing_external_id" });
-  removeDirectoryEntry(db, auth.memberId, kind as "city" | "direction" | "placement", externalId);
+  removeDirectoryEntry(db, auth.memberId, kind as "city" | "direction" | "placement" | "type", externalId);
   return res.json({ ok: true });
 });
 
@@ -529,7 +529,7 @@ app.post("/api/admin/directory/sync", async (req, res) => {
   replaceDirectory(
     db,
     auth.memberId,
-    kind as "city" | "direction" | "placement",
+    kind as "city" | "direction" | "placement" | "type",
     elements.map((e, i) => ({ externalId: e.ID, name: e.NAME, sort: Number(e.SORT || i) })),
   );
   const { typeKey, idKey } = directorySettingKeys(kind);

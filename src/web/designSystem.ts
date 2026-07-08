@@ -114,7 +114,10 @@ export const DESIGN_SYSTEM_CSS = `
   .ds-switch.on .knob { left: auto; right: 2px; }
 
   /* Table */
-  .ds-table { width: 100%; border-collapse: collapse; background: var(--surface); }
+  /* table-layout:fixed makes columns respect their declared width (or share remaining space
+     evenly if unset) instead of growing to fit content — needed so a long title truncates
+     within its column rather than pushing every other column off-screen. */
+  .ds-table { width: 100%; border-collapse: collapse; background: var(--surface); table-layout: fixed; }
   .ds-table th { padding: 7px 8px; font-size: 10.5px; font-weight: 700; color: var(--text-secondary); text-transform: uppercase; letter-spacing: .05em; text-align: left; border-bottom: 1px solid var(--border); position: sticky; top: 0; background: var(--surface); z-index: 2; }
   .ds-table td { padding: 6px 8px; border-bottom: 1px solid #eef1f3; vertical-align: middle; font-size: 13px; }
   .ds-table tbody tr:hover { background: var(--row-hover); }

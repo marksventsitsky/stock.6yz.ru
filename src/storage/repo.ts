@@ -245,7 +245,7 @@ export function setSetting(db: Db, memberId: string, key: string, value: string)
   ).run(memberId, key, value, now);
 }
 
-export type DirectoryKind = "city" | "direction" | "placement";
+export type DirectoryKind = "city" | "direction" | "placement" | "type";
 export type DirectoryEntry = { externalId: string; name: string; sort: number };
 
 export function listDirectory(db: Db, memberId: string, kind: DirectoryKind): DirectoryEntry[] {

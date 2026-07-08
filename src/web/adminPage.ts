@@ -101,6 +101,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
         let cityConfig = { iblockTypeId: null, iblockId: null, entries: [] };
         let directionConfig = { iblockTypeId: null, iblockId: null, entries: [] };
         let placementConfig = { entries: [] };
+        let typeConfig = { entries: [] };
         let discoveredLists = [];
         let statusText = "", statusKind = "";
         let tab = "catalog"; // catalog | access | directories
@@ -137,6 +138,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
         }
         function typeOptions() {
           const set = new Set();
+          if (typeConfig.entries) typeConfig.entries.forEach((e) => set.add(e.name));
           catalog.forEach((p) => { if (p.type) set.add(p.type); });
           return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
         }
@@ -171,6 +173,8 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
               directionConfig = { iblockTypeId: dirCfg.iblockTypeId, iblockId: dirCfg.iblockId, entries: dirCfg.entries || [] };
               const plCfg = await api("/api/admin/directory/config", { method: "POST", body: { ...a, kind: "placement" } });
               placementConfig = { entries: plCfg.entries || [] };
+              const typeCfg = await api("/api/admin/directory/config", { method: "POST", body: { ...a, kind: "type" } });
+              typeConfig = { entries: typeCfg.entries || [] };
             }
             setStatus("", "");
           } catch (e) {
@@ -429,8 +433,8 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
               <td><span class="ds-switch \${r.active ? "on" : ""}" data-act="toggle-active" data-key="\${escapeHtml(key)}"><span class="knob"></span></span></td>
               <td>\${statusPillHtml(status)}\${isDirty ? '<div class="ds-mono">не сохр.</div>' : ""}</td>
               <td>
-                <div style="font-size:13px;font-weight:600;color:\${status.kind === "off" || status.kind === "expired" ? "var(--text-secondary)" : "var(--text)"};max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">\${escapeHtml(r.title || "(без названия)")}</div>
-                <div style="font-size:11.5px;color:var(--text-secondary);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">\${meta ? escapeHtml(meta) : '<span class="ds-muted" style="font-style:italic">без деталей</span>'}</div>
+                <div style="font-size:13px;font-weight:600;color:\${status.kind === "off" || status.kind === "expired" ? "var(--text-secondary)" : "var(--text)"};max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">\${escapeHtml(r.title || "(без названия)")}</div>
+                <div style="font-size:11.5px;color:var(--text-secondary);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">\${meta ? escapeHtml(meta) : '<span class="ds-muted" style="font-style:italic">без деталей</span>'}</div>
               </td>
               <td>\${citiesChipHtml(r.cities)}</td>
               <td><input type="date" class="ds-input-quiet" data-act="edit-date-start" data-key="\${escapeHtml(key)}" value="\${escapeHtml(r.periodStart || "")}"/></td>
@@ -449,6 +453,10 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
             .concat(brands.indexOf(draft.brand) === -1 && draft.brand ? [draft.brand] : [])
             .concat(brands)
             .map((b) => '<option value="' + escapeHtml(b) + '" ' + (b === (draft.brand || "") ? "selected" : "") + '>' + (b || "— выберите —") + '</option>').join("");
+          const typeOpts = ['']
+            .concat(types.indexOf(draft.type) === -1 && draft.type ? [draft.type] : [])
+            .concat(types)
+            .map((t) => '<option value="' + escapeHtml(t) + '" ' + (t === (draft.type || "") ? "selected" : "") + '>' + (t || "— выберите —") + '</option>').join("");
 
           const citySet = new Set(draft.cities || []);
           const cityChips = (draft.cities || []).map((c) => '<span class="ds-chip ds-chip-accent">' + escapeHtml(c) + ' <span class="ds-chip-remove" data-act="city-remove" data-city="' + escapeHtml(c) + '">×</span></span>').join("");
@@ -474,9 +482,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
               <div class="ds-drawer-body">
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
                   <div><div class="ds-label">Бренд</div><select id="drawerBrand" class="ds-select">\${brandOpts}</select></div>
-                  <div><div class="ds-label">Тип акции</div><input id="drawerType" class="ds-input" list="typeOptionsList" value="\${escapeHtml(draft.type || "")}"/>
-                    <datalist id="typeOptionsList">\${types.map((t) => '<option value="' + escapeHtml(t) + '">').join("")}</datalist>
-                  </div>
+                  <div><div class="ds-label">Тип акции</div><select id="drawerType" class="ds-select">\${typeOpts}</select></div>
                 </div>
                 <div><div class="ds-label">Название</div><input id="drawerTitle" class="ds-input" value="\${escapeHtml(draft.title || "")}"/></div>
                 <div><div class="ds-label">Описание</div><textarea id="drawerDescription" class="ds-textarea" style="height:56px">\${escapeHtml(draft.description || "")}</textarea></div>
@@ -592,7 +598,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           const brandEl = document.getElementById("drawerBrand");
           if (brandEl) brandEl.addEventListener("change", (e) => { drawerDraft.brand = e.target.value; });
           const typeEl = document.getElementById("drawerType");
-          if (typeEl) typeEl.addEventListener("input", (e) => { drawerDraft.type = e.target.value; });
+          if (typeEl) typeEl.addEventListener("change", (e) => { drawerDraft.type = e.target.value; });
           const titleEl = document.getElementById("drawerTitle");
           if (titleEl) titleEl.addEventListener("input", (e) => { drawerDraft.title = e.target.value; });
           const descEl = document.getElementById("drawerDescription");
@@ -721,6 +727,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
                 \${directorySectionHtml("city", "Города", cityConfig)}
                 \${directorySectionHtml("direction", "Направления продаж", directionConfig)}
                 \${manualDirectorySectionHtml("placement", "Размещения", placementConfig)}
+                \${manualDirectorySectionHtml("type", "Типы акций", typeConfig)}
               </div>
             </div>
           \`;
