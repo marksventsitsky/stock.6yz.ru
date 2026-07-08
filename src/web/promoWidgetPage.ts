@@ -1,5 +1,6 @@
 import type { Promotion } from "../domain/promo.js";
 import type { Selection } from "../domain/promo.js";
+import { DESIGN_SYSTEM_CSS } from "./designSystem.js";
 
 export type PromoWidgetContext = {
   domain: string;
@@ -44,15 +45,18 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <script src="//api.bitrix24.com/api/v1/dev/"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
     <style>
-      body { background: #f8fafc; }
-      ::-webkit-scrollbar { width: 8px; height: 8px; }
-      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
+      ${DESIGN_SYSTEM_CSS}
+      body { margin: 0; }
+      .wrap { padding: 14px; max-width: 720px; }
+      .bar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+      .promo-card { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; }
+      .promo-card + .promo-card { border-top: 1px solid #eef1f3; }
+      .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
     </style>
   </head>
-  <body class="text-sm text-slate-800">
-    <div class="p-4 max-w-3xl mx-auto"><div id="app">Загрузка…</div></div>
+  <body>
+    <div class="wrap"><div id="app">Загрузка…</div></div>
     <script id="bootstrap-json" type="application/json">${bootstrapJson}</script>
     <script>
       (function () {
@@ -64,7 +68,7 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
             .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
         }
         function showFatal(title, detail) {
-          appEl.innerHTML = '<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-red-700"><b>' + escapeHtml(title) + '</b><pre class="whitespace-pre-wrap mt-2 text-xs">' + escapeHtml(typeof detail === "string" ? detail : JSON.stringify(detail, null, 2)) + '</pre></div>';
+          appEl.innerHTML = '<div class="ds-card" style="padding:12px;border-color:#f3c9c9;background:var(--danger-bg);color:var(--danger-text)"><b>' + escapeHtml(title) + '</b><pre style="white-space:pre-wrap;margin-top:8px;font-size:11px">' + escapeHtml(typeof detail === "string" ? detail : JSON.stringify(detail, null, 2)) + '</pre></div>';
         }
         window.addEventListener("error", (ev) => { try { showFatal("JS error", (ev.error && ev.error.stack) || String(ev.message || ev)); } catch {} });
         window.addEventListener("unhandledrejection", (ev) => { try { showFatal("Unhandled rejection", (ev.reason && ev.reason.stack) || String(ev.reason)); } catch {} });
@@ -79,8 +83,6 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
         const TODAY = BOOTSTRAP.today;
         const entityType = BOOTSTRAP.entityType;
         const entityId = BOOTSTRAP.entityId;
-
-        function uid() { return Math.random().toString(16).slice(2) + Date.now().toString(16); }
 
         function isActive(p) {
           if (!p.active) return false;
@@ -153,10 +155,6 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
           }
         }
 
-        function chip(label) {
-          return '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700 border border-indigo-100">' + escapeHtml(label) + '</span>';
-        }
-
         function render() {
           const cities = distinctCities();
           const types = draftCity ? typesForCity(draftCity) : [];
@@ -164,68 +162,61 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
 
           const cardsHtml = selection.length
             ? selection.map((s, i) => \`
-              <div class="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-                <div class="flex-1 min-w-0">
-                  <div class="font-medium text-slate-900">\${escapeHtml(s.title)}</div>
-                  <div class="mt-1.5 flex flex-wrap gap-1.5">
-                    \${chip(s.city || "—")}\${chip(s.brand || "—")}\${chip(s.type || "—")}
+              <div class="promo-card">
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px;font-weight:600;color:var(--text)">\${escapeHtml(s.title)}</div>
+                  <div style="margin-top:5px;display:flex;flex-wrap:wrap;gap:5px">
+                    <span class="ds-chip ds-chip-accent">\${escapeHtml(s.city || "—")}</span>
+                    <span class="ds-chip ds-chip-neutral">\${escapeHtml(s.brand || "—")}</span>
+                    <span class="ds-chip ds-chip-neutral">\${escapeHtml(s.type || "—")}</span>
                   </div>
                 </div>
-                <button type="button" data-act="remove" data-idx="\${i}" class="shrink-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg px-2 py-1 text-xs font-medium transition">Удалить</button>
+                <button type="button" data-act="remove" data-idx="\${i}" class="ds-btn-danger-text">Удалить</button>
               </div>\`).join("")
-            : '<div class="rounded-xl border border-dashed border-slate-300 p-6 text-center text-slate-400">Пока не выбрано ни одной акции</div>';
-
-          const selectCls = "w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-50 disabled:text-slate-400";
-          const labelCls = "block text-xs font-medium text-slate-500 mb-1";
+            : '<div style="padding:20px;text-align:center;color:var(--text-muted);border:1px dashed var(--border-input);border-radius:8px">Пока не выбрано ни одной акции</div>';
 
           const statusHtml = statusText
-            ? '<div class="mt-3 text-sm ' + (statusKind === "error" ? "text-red-600" : statusKind === "ok" ? "text-emerald-600" : "text-slate-500") + '">' + escapeHtml(statusText) + "</div>"
+            ? '<div style="margin-top:10px;font-size:12.5px;color:' + (statusKind === "error" ? "var(--danger-text)" : statusKind === "ok" ? "var(--success)" : "var(--text-secondary)") + '">' + escapeHtml(statusText) + "</div>"
             : "";
 
           appEl.innerHTML = \`
-            <div class="flex items-center justify-between mb-4">
-              <h1 class="text-base font-semibold text-slate-900">Акции</h1>
-              <div class="text-xs text-slate-400">\${entityType} #\${entityId || "—"}</div>
+            <div class="bar">
+              <div class="ds-h1">Акции</div>
+              <div style="flex:1"></div>
+              <div style="font-size:11px;color:var(--text-muted)">\${entityType} #\${entityId || "—"}</div>
             </div>
+            <div class="ds-card" style="margin-bottom:12px;overflow:hidden">\${cardsHtml}</div>
 
-            <div class="space-y-2 mb-4">\${cardsHtml}</div>
-
-            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h3 class="text-sm font-semibold text-slate-800 mb-3">Добавить акцию</h3>
-              <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div class="ds-card" style="padding:14px;margin-bottom:12px">
+              <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px">Добавить акцию</div>
+              <div class="grid3">
                 <div>
-                  <label class="\${labelCls}">Направление (город)</label>
-                  <select id="citySel" class="\${selectCls}">
+                  <div class="ds-label">Направление (город)</div>
+                  <select id="citySel" class="ds-select">
                     <option value="">— выберите —</option>
                     \${cities.map((c) => \`<option value="\${escapeHtml(c)}" \${c === draftCity ? "selected" : ""}>\${escapeHtml(c)}</option>\`).join("")}
                   </select>
                 </div>
                 <div>
-                  <label class="\${labelCls}">Тип акции</label>
-                  <select id="typeSel" class="\${selectCls}" \${draftCity ? "" : "disabled"}>
+                  <div class="ds-label">Тип акции</div>
+                  <select id="typeSel" class="ds-select" \${draftCity ? "" : "disabled"}>
                     <option value="">— выберите —</option>
                     \${types.map((t) => \`<option value="\${escapeHtml(t)}" \${t === draftType ? "selected" : ""}>\${escapeHtml(t)}</option>\`).join("")}
                   </select>
                 </div>
                 <div>
-                  <label class="\${labelCls}">Акция</label>
-                  <select id="promoSel" class="\${selectCls}" \${draftType ? "" : "disabled"}>
+                  <div class="ds-label">Акция</div>
+                  <select id="promoSel" class="ds-select" \${draftType ? "" : "disabled"}>
                     <option value="">— выберите —</option>
                     \${promos.map((p) => \`<option value="\${escapeHtml(p.id)}" \${p.id === draftPromoId ? "selected" : ""}>\${escapeHtml(p.title)}</option>\`).join("")}
                   </select>
                 </div>
               </div>
-              <button id="addBtn" type="button" \${draftPromoId ? "" : "disabled"}
-                class="mt-3 inline-flex items-center rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed">
-                + Добавить в список
-              </button>
+              <button id="addBtn" type="button" class="ds-btn ds-btn-outline" style="margin-top:10px" \${draftPromoId ? "" : "disabled"}>+ Добавить в список</button>
             </div>
 
-            <div class="mt-4 flex items-center gap-3">
-              <button id="saveBtn" type="button" \${saving ? "disabled" : ""}
-                class="inline-flex items-center rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50">
-                \${saving ? "Сохранение…" : "Сохранить в CRM"}
-              </button>
+            <div style="display:flex;align-items:center;gap:12px">
+              <button id="saveBtn" type="button" class="ds-btn ds-btn-primary" \${saving ? "disabled" : ""}>\${saving ? "Сохранение…" : "Сохранить в CRM"}</button>
               \${statusHtml}
             </div>
           \`;

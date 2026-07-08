@@ -1,3 +1,5 @@
+import { DESIGN_SYSTEM_CSS } from "./designSystem.js";
+
 export type AdminPageContext = {
   domain: string;
   lang: string;
@@ -20,32 +22,26 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <script src="//api.bitrix24.com/api/v1/dev/"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
     <title>Акции — админка</title>
     <style>
-      body { background: #f8fafc; }
-      ::-webkit-scrollbar { width: 8px; height: 8px; }
-      ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 999px; }
-      table.catalog input[type="text"], table.catalog textarea, table.catalog input[type="date"], table.catalog select {
-        width: 100%; border: 1px solid #e2e8f0; border-radius: 6px; padding: 3px 6px; font: inherit; box-sizing: border-box; background: #fff;
-      }
-      table.catalog textarea { resize: none; height: 44px; }
-      table.catalog tbody tr:nth-child(even) { background: #fafbfc; }
-      table.catalog tbody tr.dirty { background: #fffbeb; }
-      table.catalog thead th { position: sticky; top: 0; z-index: 5; }
-      .city-picker[open] summary { border-color: #6366f1; }
-      .city-picker summary::-webkit-details-marker { display: none; }
-      .city-picker summary { list-style: none; }
+      ${DESIGN_SYSTEM_CSS}
+      body { margin: 0; }
+      .wrap { max-width: 1600px; margin: 0 auto; padding: 20px; }
+      .toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+      .split { display: flex; align-items: stretch; }
+      .table-scroll { flex: 1; min-width: 0; max-height: 70vh; overflow: auto; }
     </style>
   </head>
-  <body class="text-sm text-slate-800">
-    <div class="max-w-[1600px] mx-auto p-5"><div id="app">Загрузка…</div></div>
+  <body>
+    <div class="wrap"><div id="app">Загрузка…</div></div>
     <script id="bootstrap-json" type="application/json">${bootstrapJson}</script>
     <script>
       (function () {
         const appEl = document.getElementById("app");
         function readJsonScript(id) { const el = document.getElementById(id); return el ? JSON.parse(el.textContent || "null") : null; }
         const BOOTSTRAP = readJsonScript("bootstrap-json");
+        const TODAY = new Date().toISOString().slice(0, 10);
+        const EXPIRING_SOON_DAYS = 14;
 
         function escapeHtml(s) {
           return String(s ?? "")
@@ -53,10 +49,30 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
             .replaceAll('"', "&quot;").replaceAll("'", "&#039;");
         }
         function showFatal(title, detail) {
-          appEl.innerHTML = '<div class="rounded-lg border border-red-200 bg-red-50 p-3 text-red-700"><b>' + escapeHtml(title) + '</b><pre class="whitespace-pre-wrap mt-2 text-xs">' + escapeHtml(String(detail)) + '</pre></div>';
+          appEl.innerHTML = '<div class="ds-card" style="padding:12px;border-color:#f3c9c9;background:var(--danger-bg);color:var(--danger-text)"><b>' + escapeHtml(title) + '</b><pre style="white-space:pre-wrap;margin-top:8px;font-size:11px">' + escapeHtml(String(detail)) + '</pre></div>';
         }
         window.addEventListener("error", (ev) => { try { showFatal("JS error", (ev.error && ev.error.stack) || String(ev.message || ev)); } catch {} });
         window.addEventListener("unhandledrejection", (ev) => { try { showFatal("Unhandled rejection", (ev.reason && ev.reason.stack) || String(ev.reason)); } catch {} });
+
+        function fmtShort(iso) {
+          if (!iso) return "";
+          const [y, m, d] = iso.split("-");
+          return d + "." + m;
+        }
+        function daysBetween(a, b) { return Math.round((new Date(b) - new Date(a)) / 86400000); }
+
+        function computeStatus(p) {
+          if (!p.active) return { kind: "off", label: "Выключена" };
+          if (p.periodEnd) {
+            if (p.periodEnd < TODAY) return { kind: "expired", label: "Истекла" };
+            if (daysBetween(TODAY, p.periodEnd) <= EXPIRING_SOON_DAYS) return { kind: "expiring", label: "Истекает " + fmtShort(p.periodEnd) };
+          }
+          if (p.periodStart && p.periodStart > TODAY) return { kind: "draft", label: "Ещё не началась" };
+          return { kind: "active", label: "Активна" };
+        }
+        function statusPillHtml(status) {
+          return '<span class="ds-status ' + status.kind + '"><span class="ds-status-dot"></span>' + escapeHtml(status.label) + '</span>';
+        }
 
         function auth() {
           let authId = BOOTSTRAP.authId, domain = BOOTSTRAP.domain, memberId = BOOTSTRAP.memberId, userId = 0;
@@ -85,7 +101,10 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
         let statusText = "", statusKind = "";
         let tab = "catalog"; // catalog | access | directories
         let filterText = "";
+        let statusFilter = "";
         const dirtyRows = new Set();
+        let drawerRowKey = null;
+        let drawerDraft = null;
 
         function setStatus(kind, text) { statusKind = kind; statusText = text || ""; render(); }
 
@@ -112,6 +131,22 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           catalog.forEach((p) => { if (p.brand) set.add(p.brand); });
           return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
         }
+        function typeOptions() {
+          const set = new Set();
+          catalog.forEach((p) => { if (p.type) set.add(p.type); });
+          return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
+        }
+        function departmentOptions() {
+          const set = new Set();
+          catalog.forEach((p) => { if (p.department) set.add(p.department); });
+          return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
+        }
+        function placementOptions() {
+          const set = new Set();
+          catalog.forEach((p) => (p.placements || []).forEach((x) => set.add(x)));
+          ["Сайт", "Директ", "КЦ", "ТВ", "SMM", "Франчайзи"].forEach((x) => set.add(x));
+          return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
+        }
 
         async function loadAll() {
           setStatus("muted", "Загрузка…");
@@ -136,59 +171,36 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           }
         }
 
-        function blankRow() {
-          return { id: "", brand: "", cities: [], type: "", title: "", description: "", periodStart: null, periodEnd: null, placements: [], department: "", active: true, sort: catalog.length, __new: true };
+        function blankPromo() {
+          return { id: "", brand: "", cities: [], type: "", title: "", description: "", periodStart: null, periodEnd: null, placements: [], department: "", active: true, sort: catalog.length };
         }
 
-        function rowKey(row, i) { return row.id && !row.__new ? row.id : "__new_" + i; }
+        function rowKey(row) { return row.id || "__new"; }
 
-        async function saveRow(row) {
+        async function persistPromo(promo) {
           const a = auth();
-          setStatus("muted", "Сохранение…");
           try {
-            const promotion = {
-              id: row.id && row.id.trim() ? row.id.trim() : "promo-" + Date.now().toString(36),
-              brand: row.brand || "",
-              cities: row.cities || [],
-              type: row.type || "",
-              title: row.title || "",
-              description: row.description || "",
-              periodStart: row.periodStart || null,
-              periodEnd: row.periodEnd || null,
-              placements: (row.placementsText || (row.placements || []).join(", ")).split(",").map((s) => s.trim()).filter(Boolean),
-              department: row.department || "",
-              active: !!row.active,
-              sort: Number(row.sort || 0),
-            };
-            await api("/api/admin/catalog/upsert", { method: "POST", body: { ...a, promotion } });
+            const id = promo.id && promo.id.trim() ? promo.id.trim() : "promo-" + Date.now().toString(36);
+            await api("/api/admin/catalog/upsert", { method: "POST", body: { ...a, promotion: { ...promo, id } } });
             return true;
           } catch (e) {
-            setStatus("error", "Ошибка сохранения «" + (row.id || row.title) + "»: " + (e && e.message ? e.message : String(e)));
+            setStatus("error", "Ошибка сохранения «" + (promo.title || promo.id) + "»: " + (e && e.message ? e.message : String(e)));
             return false;
           }
         }
 
-        async function saveOneRow(row, key) {
-          const ok = await saveRow(row);
-          if (ok) {
-            dirtyRows.delete(key);
-            if (row.__new) draftNewRow = null;
-            setStatus("ok", "Сохранено");
-          }
-          await loadAll();
-        }
-
         async function saveAllDirty() {
-          const rows = draftNewRow ? catalog.concat([draftNewRow]) : catalog;
-          const toSave = rows.filter((r, i) => dirtyRows.has(rowKey(r, i)));
+          const toSave = catalog.filter((r) => dirtyRows.has(rowKey(r)));
           if (!toSave.length) return;
           setStatus("muted", "Сохраняю " + toSave.length + " акций…");
           let ok = 0;
-          for (const row of toSave) { if (await saveRow(row)) ok++; }
+          for (const row of toSave) { if (await persistPromo(row)) ok++; }
           dirtyRows.clear();
           setStatus("ok", "Сохранено: " + ok + " из " + toSave.length);
           await loadAll();
         }
+
+        function discardAllDirty() { dirtyRows.clear(); loadAll().then(render); }
 
         async function deleteRow(id) {
           if (!confirm("Удалить акцию «" + id + "»?")) return;
@@ -196,6 +208,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           setStatus("muted", "Удаление…");
           try {
             await api("/api/admin/catalog/delete", { method: "POST", body: { ...a, id } });
+            drawerRowKey = null; drawerDraft = null;
             setStatus("ok", "Удалено");
             await loadAll();
           } catch (e) {
@@ -264,25 +277,23 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           } catch (e) { setStatus("error", "Ошибка синхронизации: " + (e && e.message ? e.message : String(e))); }
         }
 
-        let draftNewRow = null;
-
-        function tabBtn(key, label) {
-          const activeCls = tab === key ? "bg-indigo-600 text-white" : "bg-white text-slate-600 hover:bg-slate-50";
-          return '<button type="button" data-tab="' + key + '" class="tab-btn px-3 py-1.5 rounded-lg text-sm font-medium border border-slate-200 ' + activeCls + '">' + label + '</button>';
+        function tabHtml(key, label, count) {
+          const cls = "ds-tab" + (tab === key ? " active" : "");
+          return '<div class="' + cls + '" data-tab="' + key + '">' + label + (count != null ? ' <span class="count">' + count + '</span>' : '') + '</div>';
         }
 
         function render() {
-          const statusHtml = statusText
-            ? '<div class="mb-3 text-sm ' + (statusKind === "error" ? "text-red-600" : statusKind === "ok" ? "text-emerald-600" : "text-slate-500") + '">' + escapeHtml(statusText) + "</div>"
-            : "";
-
           if (!isAdmin) {
-            appEl.innerHTML = '<h1 class="text-lg font-semibold mb-3">Акции — админка</h1><div class="rounded-lg border border-red-200 bg-red-50 p-3 text-red-700">У вас нет доступа к этому разделу. Обратитесь к администратору портала, чтобы он выдал вам доступ.</div>' + statusHtml;
+            appEl.innerHTML = '<div class="ds-h1" style="margin-bottom:12px">Акции — админка</div><div class="ds-card" style="padding:12px;border-color:#f3c9c9;background:var(--danger-bg);color:var(--danger-text)">У вас нет доступа к этому разделу. Обратитесь к администратору портала, чтобы он выдал вам доступ.</div>';
             return;
           }
 
+          const statusHtml = statusText
+            ? '<div style="padding:8px 16px;font-size:12.5px;color:' + (statusKind === "error" ? "var(--danger-text)" : statusKind === "ok" ? "var(--success)" : "var(--text-secondary)") + '">' + escapeHtml(statusText) + "</div>"
+            : "";
+
           const tabsHtml = isPortalAdmin
-            ? '<div class="flex gap-2 mb-4">' + tabBtn("catalog", "Каталог акций") + tabBtn("access", "Доступ") + tabBtn("directories", "Справочники") + '</div>'
+            ? '<div class="ds-tabbar">' + tabHtml("catalog", "Каталог акций", catalog.length) + tabHtml("access", "Доступ") + tabHtml("directories", "Справочники") + '</div>'
             : "";
 
           let bodyHtml = "";
@@ -291,195 +302,326 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
           else bodyHtml = catalogTabHtml();
 
           appEl.innerHTML = \`
-            <div class="flex items-center justify-between mb-1">
-              <h1 class="text-lg font-semibold text-slate-900">Акции <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">\${catalog.length}</span></h1>
+            <div class="ds-card" style="overflow:hidden">
+              \${tabsHtml}
+              \${statusHtml}
+              \${bodyHtml}
             </div>
-            <p class="text-xs text-slate-400 mb-4">Изменения пишутся в JSON-снапшот и в обычные поля направления/бренда/типа/названия акции на лидах и сделках.</p>
-            \${tabsHtml}
-            \${statusHtml}
-            \${bodyHtml}
           \`;
 
-          appEl.querySelectorAll(".tab-btn").forEach((el) => el.addEventListener("click", (e) => { tab = e.currentTarget.getAttribute("data-tab"); render(); }));
+          appEl.querySelectorAll("[data-tab]").forEach((el) => el.addEventListener("click", (e) => { tab = e.currentTarget.getAttribute("data-tab"); render(); }));
           wireCatalogTab();
           wireAccessTab();
           wireDirectoriesTab();
         }
 
         function matchesFilter(r) {
+          if (statusFilter && computeStatus(r).kind !== statusFilter) return false;
           if (!filterText) return true;
           const q = filterText.toLowerCase();
           const hay = [r.id, r.brand, r.type, r.title, r.description, (r.cities || []).join(" ")].join(" ").toLowerCase();
           return hay.indexOf(q) !== -1;
         }
 
+        function citiesChipHtml(cities) {
+          if (!cities || !cities.length) return '<span class="ds-muted">—</span>';
+          if (cities.includes("Все")) return '<span class="ds-chip ds-chip-accent">Все города</span>';
+          const rest = cities.length > 1 ? ' <span style="font-size:11.5px;color:var(--accent);font-weight:600">+' + (cities.length - 1) + '</span>' : "";
+          return '<span class="ds-chip ds-chip-accent">' + escapeHtml(cities[0]) + '</span>' + rest;
+        }
+        function placementsChipHtml(placements) {
+          if (!placements || !placements.length) return '<span class="ds-muted">—</span>';
+          const shown = placements.slice(0, 2).map((p) => '<span class="ds-chip ds-chip-neutral">' + escapeHtml(p) + '</span>').join(" ");
+          const rest = placements.length > 2 ? ' <span style="font-size:11px;color:var(--text-secondary)">+' + (placements.length - 2) + '</span>' : "";
+          return shown + rest;
+        }
+
         function catalogTabHtml() {
-          const allRows = draftNewRow ? catalog.concat([draftNewRow]) : catalog;
-          const visible = allRows
-            .map((r, i) => ({ r, i }))
-            .filter(({ r }) => matchesFilter(r));
+          const visible = catalog.filter(matchesFilter);
           const dirtyCount = dirtyRows.size;
 
+          const drawerHtml = drawerDraft ? drawerHtmlFor(drawerDraft) : "";
+
           return \`
-            <div class="flex flex-wrap items-center gap-2 mb-3">
-              <button id="addRowBtn" type="button" class="inline-flex items-center rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-indigo-700">+ Добавить акцию</button>
-              <button id="saveAllBtn" type="button" \${dirtyCount ? "" : "disabled"}
-                class="inline-flex items-center rounded-lg bg-amber-500 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-amber-600 disabled:opacity-40 disabled:cursor-not-allowed">
-                💾 Сохранить изменённые\${dirtyCount ? " (" + dirtyCount + ")" : ""}
-              </button>
-              <button id="resyncBtn" type="button" class="inline-flex items-center rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Синхронизировать справочники в Bitrix</button>
-              <div class="flex-1"></div>
-              <input id="filterInput" type="text" placeholder="Поиск по бренду, типу, названию, городу…" value="\${escapeHtml(filterText)}"
-                class="w-72 rounded-lg border border-slate-300 px-3 py-2 text-sm" />
+            <div class="toolbar">
+              <input id="filterInput" type="text" class="ds-input" style="width:220px" placeholder="Поиск: бренд, название, город…" value="\${escapeHtml(filterText)}"/>
+              <select id="statusFilterSel" class="ds-select" style="width:auto">
+                <option value="">Статус: все</option>
+                <option value="active" \${statusFilter === "active" ? "selected" : ""}>Активна</option>
+                <option value="expiring" \${statusFilter === "expiring" ? "selected" : ""}>Истекает</option>
+                <option value="expired" \${statusFilter === "expired" ? "selected" : ""}>Истекла</option>
+                <option value="off" \${statusFilter === "off" ? "selected" : ""}>Выключена</option>
+              </select>
+              <div style="flex:1"></div>
+              <button id="resyncBtn" type="button" class="ds-btn ds-btn-plain">Синхронизировать справочники</button>
+              <button id="addRowBtn" type="button" class="ds-btn ds-btn-outline">+ Акция</button>
+              <button id="saveAllBtn" type="button" class="ds-btn ds-btn-primary" \${dirtyCount ? "" : "disabled"}>Сохранить \${dirtyCount ? '<span class="ds-btn-badge">' + dirtyCount + '</span>' : ""}</button>
             </div>
-            <div class="text-xs text-slate-400 mb-2">Показано \${visible.length} из \${allRows.length}</div>
-            <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm max-h-[70vh] overflow-y-auto">
-              <table class="catalog w-full text-xs border-collapse">
-                <thead>
-                  <tr class="bg-slate-50 text-slate-500 text-left">
-                    <th class="p-2 w-20">ID</th>
-                    <th class="p-2 w-28">Бренд</th>
-                    <th class="p-2 w-36">Города</th>
-                    <th class="p-2 w-32">Тип</th>
-                    <th class="p-2 w-52">Название</th>
-                    <th class="p-2">Описание</th>
-                    <th class="p-2 w-28">С</th>
-                    <th class="p-2 w-28">По</th>
-                    <th class="p-2 w-28">Размещения</th>
-                    <th class="p-2 w-24">Отдел</th>
-                    <th class="p-2 w-12">Вкл</th>
-                    <th class="p-2 w-20"></th>
-                  </tr>
-                </thead>
-                <tbody>\${visible.map(({ r, i }) => rowHtml(r, i)).join("") || '<tr><td colspan="12" class="p-4 text-center text-slate-400">Ничего не найдено</td></tr>'}</tbody>
-              </table>
+            <div class="split">
+              <div class="table-scroll">
+                <table class="ds-table">
+                  <thead>
+                    <tr>
+                      <th style="width:36px">Вкл</th>
+                      <th style="width:120px">Статус</th>
+                      <th>Акция</th>
+                      <th style="width:150px">Города</th>
+                      <th style="width:84px">С</th>
+                      <th style="width:84px">По</th>
+                      <th style="width:70px"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    \${visible.map((r) => catalogRowHtml(r)).join("") || '<tr><td colspan="7" style="padding:24px;text-align:center;color:var(--text-muted)">Ничего не найдено</td></tr>'}
+                  </tbody>
+                </table>
+              </div>
+              \${drawerHtml}
+            </div>
+            \${dirtyCount ? \`
+              <div class="ds-unsaved-bar">
+                <span style="width:8px;height:8px;border-radius:50%;background:var(--warning)"></span>
+                <span style="font-size:12.5px;color:var(--warning-text);font-weight:600">\${dirtyCount} \${dirtyCount === 1 ? "акция" : "акции"} с несохранёнными изменениями</span>
+                <span style="font-size:12px;color:#a8894f">\${Array.from(dirtyRows).join(", ")}</span>
+                <div style="flex:1"></div>
+                <button id="discardAllBtn" type="button" class="ds-btn-text">Отменить всё</button>
+                <button id="saveAllBtn2" type="button" class="ds-btn ds-btn-primary">Сохранить \${dirtyCount}</button>
+              </div>
+            \` : ""}
+            <div style="padding:8px 16px;font-size:11.5px;color:var(--text-muted)">Показано \${visible.length} из \${catalog.length}</div>
+          \`;
+        }
+
+        function catalogRowHtml(r) {
+          const key = rowKey(r);
+          const isDirty = dirtyRows.has(key);
+          const isSelected = drawerRowKey === key;
+          const status = computeStatus(r);
+          const meta = [r.brand, r.type, r.department].filter(Boolean).join(" · ");
+          return \`
+            <tr class="\${isDirty ? "dirty" : ""} \${isSelected ? "selected" : ""}" data-key="\${escapeHtml(key)}">
+              <td><span class="ds-switch \${r.active ? "on" : ""}" data-act="toggle-active" data-key="\${escapeHtml(key)}"><span class="knob"></span></span></td>
+              <td>\${statusPillHtml(status)}\${isDirty ? '<div class="ds-mono">не сохр.</div>' : ""}</td>
+              <td>
+                <div style="font-size:13px;font-weight:600;color:\${status.kind === "off" || status.kind === "expired" ? "var(--text-secondary)" : "var(--text)"};max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">\${escapeHtml(r.title || "(без названия)")}</div>
+                <div style="font-size:11.5px;color:var(--text-secondary);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">\${meta ? escapeHtml(meta) : '<span class="ds-muted" style="font-style:italic">без деталей</span>'}</div>
+              </td>
+              <td>\${citiesChipHtml(r.cities)}</td>
+              <td><input type="date" class="ds-input-quiet" data-act="edit-date-start" data-key="\${escapeHtml(key)}" value="\${escapeHtml(r.periodStart || "")}"/></td>
+              <td><input type="date" class="ds-input-quiet" data-act="edit-date-end" data-key="\${escapeHtml(key)}" value="\${escapeHtml(r.periodEnd || "")}"/></td>
+              <td style="text-align:right"><span data-act="open-drawer" data-key="\${escapeHtml(key)}" style="font-size:12px;color:var(--accent);cursor:pointer">Открыть</span></td>
+            </tr>\`;
+        }
+
+        function drawerHtmlFor(draft) {
+          const isNew = !draft.id;
+          const brands = brandOptions(), types = typeOptions(), depts = departmentOptions(), placements = placementOptions(), cities = cityOptions();
+          const brandOpts = ['']
+            .concat(brands.indexOf(draft.brand) === -1 && draft.brand ? [draft.brand] : [])
+            .concat(brands)
+            .map((b) => '<option value="' + escapeHtml(b) + '" ' + (b === (draft.brand || "") ? "selected" : "") + '>' + (b || "— выберите —") + '</option>').join("");
+
+          const citySet = new Set(draft.cities || []);
+          const cityChips = (draft.cities || []).map((c) => '<span class="ds-chip ds-chip-accent">' + escapeHtml(c) + ' <span class="ds-chip-remove" data-act="city-remove" data-city="' + escapeHtml(c) + '">×</span></span>').join("");
+          const cityPickerOptions = ["Все"].concat(cities).map((c) =>
+            '<label style="display:flex;align-items:center;gap:6px;padding:3px 4px;border-radius:4px;cursor:pointer;font-size:12.5px" onmouseover="this.style.background=\\'#fafbfc\\'" onmouseout="this.style.background=\\'\\'">' +
+              '<input type="checkbox" class="drawer-city-check" value="' + escapeHtml(c) + '" ' + (citySet.has(c) ? "checked" : "") + '/> ' + escapeHtml(c) +
+            '</label>'
+          ).join("");
+
+          const placementSet = new Set(draft.placements || []);
+          const placementChips = placements.map((p) =>
+            '<span class="ds-toggle-chip ' + (placementSet.has(p) ? "on" : "") + '" data-act="placement-toggle" data-val="' + escapeHtml(p) + '">' + escapeHtml(p) + '</span>'
+          ).join("");
+
+          return \`
+            <div class="ds-drawer">
+              <div class="ds-drawer-header">
+                <div style="font-size:13.5px;font-weight:700;color:var(--text)">\${isNew ? "Новая акция" : "Редактирование акции"}</div>
+                \${draft.id ? '<span class="ds-mono">' + escapeHtml(draft.id) + '</span>' : ''}
+                <div style="flex:1"></div>
+                <span class="ds-close" data-act="drawer-close">✕</span>
+              </div>
+              <div class="ds-drawer-body">
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                  <div><div class="ds-label">Бренд</div><select id="drawerBrand" class="ds-select">\${brandOpts}</select></div>
+                  <div><div class="ds-label">Тип акции</div><input id="drawerType" class="ds-input" list="typeOptionsList" value="\${escapeHtml(draft.type || "")}"/>
+                    <datalist id="typeOptionsList">\${types.map((t) => '<option value="' + escapeHtml(t) + '">').join("")}</datalist>
+                  </div>
+                </div>
+                <div><div class="ds-label">Название</div><input id="drawerTitle" class="ds-input" value="\${escapeHtml(draft.title || "")}"/></div>
+                <div><div class="ds-label">Описание</div><textarea id="drawerDescription" class="ds-textarea" style="height:56px">\${escapeHtml(draft.description || "")}</textarea></div>
+                <div>
+                  <div class="ds-label">Города</div>
+                  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:7px;border:1px solid var(--border-input);border-radius:4px">
+                    \${cityChips}
+                    <details class="ds-city-picker" style="position:relative">
+                      <summary style="font-size:12px;color:var(--accent)">+ город</summary>
+                      <div style="position:absolute;z-index:20;margin-top:4px;max-height:220px;overflow:auto;width:220px;background:#fff;border:1px solid var(--border);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.12);padding:6px">\${cityPickerOptions}</div>
+                    </details>
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+                  <div><div class="ds-label">Действует с</div><input id="drawerPeriodStart" type="date" class="ds-input" value="\${escapeHtml(draft.periodStart || "")}"/></div>
+                  <div><div class="ds-label">По</div><input id="drawerPeriodEnd" type="date" class="ds-input" value="\${escapeHtml(draft.periodEnd || "")}"/></div>
+                </div>
+                <div>
+                  <div class="ds-label">Размещения</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:6px">\${placementChips}</div>
+                </div>
+                <div><div class="ds-label">Отдел</div><input id="drawerDepartment" class="ds-input" list="deptOptionsList" value="\${escapeHtml(draft.department || "")}"/>
+                  <datalist id="deptOptionsList">\${depts.map((d) => '<option value="' + escapeHtml(d) + '">').join("")}</datalist>
+                </div>
+              </div>
+              <div class="ds-drawer-footer">
+                <button data-act="drawer-apply" type="button" class="ds-btn ds-btn-primary">Применить</button>
+                <button data-act="drawer-cancel" type="button" class="ds-btn ds-btn-plain">Отменить</button>
+                <div style="flex:1"></div>
+                \${!isNew ? '<button data-act="drawer-delete" type="button" class="ds-btn-danger-text">Удалить</button>' : ""}
+              </div>
             </div>
           \`;
         }
 
-        function rowHtml(r, i) {
-          const prefix = "row" + i + "_";
-          const key = rowKey(r, i);
-          const isDirty = dirtyRows.has(key);
-          const idField = r.__new
-            ? '<input type="text" id="' + prefix + 'id" placeholder="авто" value="' + escapeHtml(r.id || "") + '"/>'
-            : '<span class="text-slate-400">' + escapeHtml(r.id) + '</span>';
-
-          const brands = brandOptions();
-          const brandVal = r.brand || "";
-          const brandOptsHtml = ['']
-            .concat(brands.indexOf(brandVal) === -1 && brandVal ? [brandVal] : [])
-            .concat(brands)
-            .map((b) => '<option value="' + escapeHtml(b) + '" ' + (b === brandVal ? "selected" : "") + '>' + (b ? escapeHtml(b) : "— выберите —") + '</option>')
-            .join("");
-
-          const cities = cityOptions();
-          const citySelected = new Set(r.cities || []);
-          const allCityValues = ["Все"].concat(cities);
-          const cityCheckboxes = allCityValues.map((c) =>
-            '<label class="flex items-center gap-1.5 px-1 py-0.5 rounded hover:bg-slate-50 cursor-pointer">' +
-              '<input type="checkbox" class="city-check" data-row="' + i + '" value="' + escapeHtml(c) + '" ' + (citySelected.has(c) ? "checked" : "") + '/>' +
-              '<span>' + escapeHtml(c) + '</span>' +
-            '</label>'
-          ).join("");
-          const citySummary = (r.cities || []).length ? (r.cities || []).join(", ") : "Выбрать города";
-
-          return \`
-            <tr class="border-t border-slate-100 hover:bg-slate-50/60 align-top \${isDirty ? "dirty" : ""}" data-key="\${escapeHtml(key)}">
-              <td class="p-2">\${idField}</td>
-              <td class="p-2"><select id="\${prefix}brand">\${brandOptsHtml}</select></td>
-              <td class="p-2 relative">
-                <details class="city-picker">
-                  <summary class="cursor-pointer select-none rounded-md border border-slate-300 bg-white px-2 py-1 text-xs truncate block" title="\${escapeHtml(citySummary)}">\${escapeHtml(citySummary)}</summary>
-                  <div class="absolute z-20 mt-1 max-h-56 w-56 overflow-auto rounded-lg border border-slate-200 bg-white p-1.5 shadow-lg">\${cityCheckboxes}</div>
-                </details>
-              </td>
-              <td class="p-2"><input type="text" id="\${prefix}type" value="\${escapeHtml(r.type || "")}"/></td>
-              <td class="p-2"><textarea id="\${prefix}title">\${escapeHtml(r.title || "")}</textarea></td>
-              <td class="p-2"><textarea id="\${prefix}description">\${escapeHtml(r.description || "")}</textarea></td>
-              <td class="p-2"><input type="date" id="\${prefix}periodStart" value="\${escapeHtml(r.periodStart || "")}"/></td>
-              <td class="p-2"><input type="date" id="\${prefix}periodEnd" value="\${escapeHtml(r.periodEnd || "")}"/></td>
-              <td class="p-2"><input type="text" id="\${prefix}placementsText" value="\${escapeHtml((r.placements || []).join(", "))}"/></td>
-              <td class="p-2"><input type="text" id="\${prefix}department" value="\${escapeHtml(r.department || "")}"/></td>
-              <td class="p-2 text-center"><input type="checkbox" id="\${prefix}active" \${r.active ? "checked" : ""}/></td>
-              <td class="p-2">
-                <div class="flex gap-1">
-                  <button id="\${prefix}save" type="button" class="rounded-md bg-indigo-600 text-white px-2 py-1 hover:bg-indigo-700">💾</button>
-                  \${r.__new ? "" : '<button id="' + prefix + 'del" type="button" class="rounded-md bg-red-600 text-white px-2 py-1 hover:bg-red-700">✕</button>'}
-                </div>
-              </td>
-            </tr>\`;
+        function openDrawer(row) {
+          drawerRowKey = rowKey(row);
+          drawerDraft = JSON.parse(JSON.stringify(row));
+          render();
         }
+        function openDrawerNew() {
+          drawerRowKey = "__new";
+          drawerDraft = blankPromo();
+          render();
+        }
+        function closeDrawer() { drawerRowKey = null; drawerDraft = null; render(); }
 
         function wireCatalogTab() {
-          const allRows = draftNewRow ? catalog.concat([draftNewRow]) : catalog;
-          const visible = allRows.map((r, i) => ({ r, i })).filter(({ r }) => matchesFilter(r));
-
-          const addRowBtn = document.getElementById("addRowBtn");
-          if (addRowBtn) addRowBtn.addEventListener("click", () => { draftNewRow = blankRow(); render(); });
-          const resyncBtn = document.getElementById("resyncBtn");
-          if (resyncBtn) resyncBtn.addEventListener("click", resyncFields);
-          const saveAllBtn = document.getElementById("saveAllBtn");
-          if (saveAllBtn) saveAllBtn.addEventListener("click", saveAllDirty);
           const filterInput = document.getElementById("filterInput");
           if (filterInput) {
             filterInput.addEventListener("input", (e) => { filterText = e.target.value; render(); });
             filterInput.focus();
             filterInput.selectionStart = filterInput.selectionEnd = filterInput.value.length;
           }
+          const statusFilterSel = document.getElementById("statusFilterSel");
+          if (statusFilterSel) statusFilterSel.addEventListener("change", (e) => { statusFilter = e.target.value; render(); });
 
-          visible.forEach(({ r, i }) => {
-            const prefix = "row" + i + "_";
-            const key = rowKey(r, i);
-            const markDirty = () => { dirtyRows.add(key); };
+          const resyncBtn = document.getElementById("resyncBtn");
+          if (resyncBtn) resyncBtn.addEventListener("click", resyncFields);
+          const addRowBtn = document.getElementById("addRowBtn");
+          if (addRowBtn) addRowBtn.addEventListener("click", openDrawerNew);
+          ["saveAllBtn", "saveAllBtn2"].forEach((id) => { const el = document.getElementById(id); if (el) el.addEventListener("click", saveAllDirty); });
+          const discardAllBtn = document.getElementById("discardAllBtn");
+          if (discardAllBtn) discardAllBtn.addEventListener("click", discardAllDirty);
 
-            ["id","type","title","description","periodStart","periodEnd","placementsText","department"].forEach((k) => {
-              const el = document.getElementById(prefix + k);
-              if (el) el.addEventListener("input", (e) => { r[k] = e.target.value; markDirty(); const tr = el.closest("tr"); if (tr) tr.classList.add("dirty"); });
-            });
-            const brandEl = document.getElementById(prefix + "brand");
-            if (brandEl) brandEl.addEventListener("change", (e) => { r.brand = e.target.value; markDirty(); const tr = e.target.closest("tr"); if (tr) tr.classList.add("dirty"); });
+          appEl.querySelectorAll('[data-act="toggle-active"]').forEach((el) => el.addEventListener("click", (e) => {
+            const key = e.currentTarget.getAttribute("data-key");
+            const row = catalog.find((r) => rowKey(r) === key);
+            if (!row) return;
+            row.active = !row.active;
+            dirtyRows.add(key);
+            render();
+          }));
+          appEl.querySelectorAll('[data-act="edit-date-start"]').forEach((el) => el.addEventListener("change", (e) => {
+            const key = e.currentTarget.getAttribute("data-key");
+            const row = catalog.find((r) => rowKey(r) === key);
+            if (!row) return;
+            row.periodStart = e.currentTarget.value || null;
+            dirtyRows.add(key);
+            render();
+          }));
+          appEl.querySelectorAll('[data-act="edit-date-end"]').forEach((el) => el.addEventListener("change", (e) => {
+            const key = e.currentTarget.getAttribute("data-key");
+            const row = catalog.find((r) => rowKey(r) === key);
+            if (!row) return;
+            row.periodEnd = e.currentTarget.value || null;
+            dirtyRows.add(key);
+            render();
+          }));
+          appEl.querySelectorAll('[data-act="open-drawer"]').forEach((el) => el.addEventListener("click", (e) => {
+            const key = e.currentTarget.getAttribute("data-key");
+            const row = catalog.find((r) => rowKey(r) === key);
+            if (row) openDrawer(row);
+          }));
 
-            appEl.querySelectorAll('.city-check[data-row="' + i + '"]').forEach((cb) => {
-              cb.addEventListener("change", (e) => {
-                const val = e.target.value;
-                const set = new Set(r.cities || []);
-                if (e.target.checked) set.add(val); else set.delete(val);
-                r.cities = Array.from(set);
-                markDirty();
-                render();
-              });
-            });
+          if (drawerDraft) wireDrawer();
+        }
 
-            const active = document.getElementById(prefix + "active");
-            if (active) active.addEventListener("change", (e) => { r.active = e.target.checked; markDirty(); render(); });
-            const saveBtn = document.getElementById(prefix + "save");
-            if (saveBtn) saveBtn.addEventListener("click", () => saveOneRow(r, key));
-            const delBtn = document.getElementById(prefix + "del");
-            if (delBtn) delBtn.addEventListener("click", () => deleteRow(r.id));
+        function wireDrawer() {
+          const brandEl = document.getElementById("drawerBrand");
+          if (brandEl) brandEl.addEventListener("change", (e) => { drawerDraft.brand = e.target.value; });
+          const typeEl = document.getElementById("drawerType");
+          if (typeEl) typeEl.addEventListener("input", (e) => { drawerDraft.type = e.target.value; });
+          const titleEl = document.getElementById("drawerTitle");
+          if (titleEl) titleEl.addEventListener("input", (e) => { drawerDraft.title = e.target.value; });
+          const descEl = document.getElementById("drawerDescription");
+          if (descEl) descEl.addEventListener("input", (e) => { drawerDraft.description = e.target.value; });
+          const startEl = document.getElementById("drawerPeriodStart");
+          if (startEl) startEl.addEventListener("change", (e) => { drawerDraft.periodStart = e.target.value || null; });
+          const endEl = document.getElementById("drawerPeriodEnd");
+          if (endEl) endEl.addEventListener("change", (e) => { drawerDraft.periodEnd = e.target.value || null; });
+          const deptEl = document.getElementById("drawerDepartment");
+          if (deptEl) deptEl.addEventListener("input", (e) => { drawerDraft.department = e.target.value; });
+
+          appEl.querySelectorAll('[data-act="city-remove"]').forEach((el) => el.addEventListener("click", (e) => {
+            const city = e.currentTarget.getAttribute("data-city");
+            drawerDraft.cities = (drawerDraft.cities || []).filter((c) => c !== city);
+            render();
+          }));
+          appEl.querySelectorAll(".drawer-city-check").forEach((el) => el.addEventListener("change", (e) => {
+            const val = e.target.value;
+            const set = new Set(drawerDraft.cities || []);
+            if (e.target.checked) set.add(val); else set.delete(val);
+            drawerDraft.cities = Array.from(set);
+            render();
+          }));
+          appEl.querySelectorAll('[data-act="placement-toggle"]').forEach((el) => el.addEventListener("click", (e) => {
+            const val = e.currentTarget.getAttribute("data-val");
+            const set = new Set(drawerDraft.placements || []);
+            if (set.has(val)) set.delete(val); else set.add(val);
+            drawerDraft.placements = Array.from(set);
+            render();
+          }));
+
+          const applyBtn = document.querySelector('[data-act="drawer-apply"]');
+          if (applyBtn) applyBtn.addEventListener("click", () => {
+            const key = drawerRowKey;
+            if (key === "__new") {
+              catalog.push(drawerDraft);
+            } else {
+              const idx = catalog.findIndex((r) => rowKey(r) === key);
+              if (idx !== -1) catalog[idx] = drawerDraft;
+            }
+            dirtyRows.add(rowKey(drawerDraft));
+            drawerRowKey = null; drawerDraft = null;
+            render();
           });
+          const cancelBtn = document.querySelector('[data-act="drawer-cancel"]');
+          if (cancelBtn) cancelBtn.addEventListener("click", closeDrawer);
+          const closeBtn = document.querySelector('[data-act="drawer-close"]');
+          if (closeBtn) closeBtn.addEventListener("click", closeDrawer);
+          const deleteBtn = document.querySelector('[data-act="drawer-delete"]');
+          if (deleteBtn) deleteBtn.addEventListener("click", () => deleteRow(drawerDraft.id));
         }
 
         function accessTabHtml() {
           return \`
-            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm max-w-xl">
-              <h3 class="text-sm font-semibold text-slate-800 mb-1">Доступ к админке (кроме администраторов портала)</h3>
-              <p class="text-xs text-slate-400 mb-3">Выдайте доступ конкретному сотруднику, не делая его полным администратором портала Bitrix24.</p>
-              <div class="flex gap-2 mb-3">
-                <input type="text" id="accessQuery" placeholder="Имя или email сотрудника…" value="\${escapeHtml(accessQuery)}"
-                  class="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"/>
-                <button id="accessSearchBtn" type="button" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50">Найти</button>
+            <div style="padding:16px;max-width:560px">
+              <div class="ds-h1" style="margin-bottom:4px">Доступ к админке</div>
+              <p class="ds-muted" style="margin:0 0 12px">Выдайте доступ конкретному сотруднику, не делая его полным администратором портала Bitrix24.</p>
+              <div style="display:flex;gap:8px;margin-bottom:12px">
+                <input type="text" id="accessQuery" class="ds-input" placeholder="Имя или email сотрудника…" value="\${escapeHtml(accessQuery)}"/>
+                <button id="accessSearchBtn" type="button" class="ds-btn ds-btn-plain">Найти</button>
               </div>
-              \${userSearchResults.length ? '<div class="flex flex-wrap gap-2 mb-3">' +
-                userSearchResults.map((u) => '<button type="button" class="add-access-btn rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 px-2 py-1 text-xs font-medium hover:bg-emerald-100" data-uid="' + u.userId + '" data-name="' + escapeHtml(u.name) + '">+ ' + escapeHtml(u.name) + '</button>').join("") +
+              \${userSearchResults.length ? '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px">' +
+                userSearchResults.map((u) => '<button type="button" class="add-access-btn ds-btn" style="background:var(--success-bg);color:var(--success);border:1px solid #cdeedb" data-uid="' + u.userId + '" data-name="' + escapeHtml(u.name) + '">+ ' + escapeHtml(u.name) + '</button>').join("") +
                 '</div>' : ""}
-              <table class="w-full text-xs">
-                <thead><tr class="text-left text-slate-500"><th class="py-1">Пользователь</th><th class="py-1 w-20">ID</th><th class="py-1 w-12"></th></tr></thead>
+              <table style="width:100%;font-size:12.5px;border-collapse:collapse">
+                <thead><tr style="text-align:left;color:var(--text-secondary)"><th style="padding:4px 0">Пользователь</th><th style="width:70px">ID</th><th style="width:40px"></th></tr></thead>
                 <tbody>
                   \${accessUsers.length ? accessUsers.map((u) => \`
-                    <tr class="border-t border-slate-100"><td class="py-1.5">\${escapeHtml(u.name)}</td><td class="py-1.5">\${u.userId}</td>
-                      <td class="py-1.5"><button type="button" class="remove-access-btn rounded-md bg-red-600 text-white px-2 py-0.5" data-uid="\${u.userId}">✕</button></td></tr>
-                  \`).join("") : '<tr><td colspan="3" class="py-2 text-slate-400">Пока никому, кроме админов портала, доступ не выдан.</td></tr>'}
+                    <tr style="border-top:1px solid var(--border)"><td style="padding:6px 0">\${escapeHtml(u.name)}</td><td>\${u.userId}</td>
+                      <td><button type="button" class="remove-access-btn ds-btn-danger-text" data-uid="\${u.userId}">✕</button></td></tr>
+                  \`).join("") : '<tr><td colspan="3" style="padding:8px 0;color:var(--text-muted)">Пока никому, кроме админов портала, доступ не выдан.</td></tr>'}
                 </tbody>
               </table>
             </div>\`;
@@ -499,25 +641,27 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
             ? \`Источник: type=\${escapeHtml(cfg.iblockTypeId)}, id=\${escapeHtml(cfg.iblockId)} · загружено: \${cfg.entries.length}\`
             : "Источник ещё не выбран — значения берутся из уже введённых в акциях данных.";
           return \`
-            <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h3 class="text-sm font-semibold text-slate-800 mb-1">\${title}</h3>
-              <p class="text-xs text-slate-400 mb-3">\${configured}</p>
-              \${discoveredLists.length ? '<div class="space-y-1.5 mb-3">' + discoveredLists.map((l) =>
-                '<div class="flex items-center justify-between rounded-lg border border-slate-200 p-2 text-xs">' +
-                  '<div>' + escapeHtml(l.NAME) + ' <span class="text-slate-400">(type=' + escapeHtml(l.IBLOCK_TYPE_ID) + ', id=' + escapeHtml(l.IBLOCK_ID) + ')</span></div>' +
-                  '<button type="button" class="sync-list-btn rounded-md bg-indigo-600 text-white px-2 py-1" data-kind="' + kind + '" data-type="' + escapeHtml(l.IBLOCK_TYPE_ID) + '" data-id="' + escapeHtml(l.IBLOCK_ID) + '">Использовать для «' + title + '»</button>' +
+            <div class="ds-card" style="padding:14px">
+              <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px">\${title}</div>
+              <p class="ds-muted" style="margin:0 0 10px">\${configured}</p>
+              \${discoveredLists.length ? '<div style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px">' + discoveredLists.map((l) =>
+                '<div style="display:flex;align-items:center;justify-content:space-between;border:1px solid var(--border);border-radius:6px;padding:8px;font-size:12px">' +
+                  '<div>' + escapeHtml(l.NAME) + ' <span class="ds-muted">(type=' + escapeHtml(l.IBLOCK_TYPE_ID) + ', id=' + escapeHtml(l.IBLOCK_ID) + ')</span></div>' +
+                  '<button type="button" class="sync-list-btn ds-btn ds-btn-primary" data-kind="' + kind + '" data-type="' + escapeHtml(l.IBLOCK_TYPE_ID) + '" data-id="' + escapeHtml(l.IBLOCK_ID) + '">Использовать</button>' +
                 '</div>').join("") + '</div>' : ""}
-              \${cfg.entries.length ? '<div class="flex flex-wrap gap-1.5">' + cfg.entries.slice(0, 40).map((e) =>
-                '<span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-600">' + escapeHtml(e.name) + '</span>').join("") + '</div>' : ""}
+              \${cfg.entries.length ? '<div style="display:flex;flex-wrap:wrap;gap:6px">' + cfg.entries.slice(0, 40).map((e) =>
+                '<span class="ds-chip ds-chip-neutral">' + escapeHtml(e.name) + '</span>').join("") + '</div>' : ""}
             </div>\`;
         }
 
         function directoriesTabHtml() {
           return \`
-            <button id="discoverBtn" type="button" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50 mb-3">Найти списки в Битрикс24</button>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              \${directorySectionHtml("city", "Города", cityConfig)}
-              \${directorySectionHtml("direction", "Направления продаж", directionConfig)}
+            <div style="padding:16px">
+              <button id="discoverBtn" type="button" class="ds-btn ds-btn-plain" style="margin-bottom:12px">Найти списки в Битрикс24</button>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">
+                \${directorySectionHtml("city", "Города", cityConfig)}
+                \${directorySectionHtml("direction", "Направления продаж", directionConfig)}
+              </div>
             </div>
           \`;
         }
