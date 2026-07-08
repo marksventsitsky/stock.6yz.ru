@@ -83,16 +83,17 @@ function migrate(db: Db) {
       PRIMARY KEY (member_id, key)
     );
 
-    -- Mirror of city names pulled from the portal's own Bitrix24 "Списки" (Универсальные списки),
-    -- so the promo catalog's city picker matches the company's single source of truth for cities
-    -- instead of free-typed strings.
-    CREATE TABLE IF NOT EXISTS city_directory (
+    -- Mirror of names pulled from the portal's own Bitrix24 "Списки" (Универсальные списки),
+    -- keyed by "kind" (e.g. 'city', 'direction'), so catalog pickers match the company's single
+    -- source of truth instead of free-typed strings. Each kind syncs from its own chosen list.
+    CREATE TABLE IF NOT EXISTS list_directory (
       member_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
       external_id TEXT NOT NULL,
       name TEXT NOT NULL,
       sort INTEGER NOT NULL DEFAULT 0,
       updated_at_ms INTEGER NOT NULL,
-      PRIMARY KEY (member_id, external_id)
+      PRIMARY KEY (member_id, kind, external_id)
     );
   `);
 }

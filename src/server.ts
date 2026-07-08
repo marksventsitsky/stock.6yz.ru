@@ -10,10 +10,10 @@ import {
   getSetting,
   isAdminUserAllowed,
   listAdminUsers,
-  listCityDirectory,
+  listDirectory,
   listPromotions,
   removeAdminUser,
-  replaceCityDirectory,
+  replaceDirectory,
   setSetting,
   upsertPortalAuth,
   upsertPromotion,
@@ -454,12 +454,14 @@ app.post("/api/admin/resync-fields", async (req, res) => {
   return res.json({ ok: true, result });
 });
 
-const CITY_LIST_IBLOCK_TYPE_KEY = "city_list_iblock_type_id";
-const CITY_LIST_IBLOCK_ID_KEY = "city_list_iblock_id";
+const DIRECTORY_KINDS = new Set(["city", "direction"]);
+function directorySettingKeys(kind: string) {
+  return { typeKey: `${kind}_list_iblock_type_id`, idKey: `${kind}_list_iblock_id` };
+}
 
 // Enumerates the portal's Bitrix24 "Списки" (universal lists) so an admin can pick which one
-// holds the canonical city directory (e.g. https://<portal>/company/lists/<id>/...).
-app.post("/api/admin/citylist/discover", async (req, res) => {
+// holds a canonical directory (cities, sales directions, ...).
+app.post("/api/admin/directory/discover", async (req, res) => {
   const auth = await resolveAdminAuth(req);
   if (!auth.isPortalAdmin) return res.status(403).json({ error: "forbidden" });
   if (!auth.domain || !auth.accessToken) return res.status(400).json({ error: "missing_access_token" });
@@ -467,22 +469,27 @@ app.post("/api/admin/citylist/discover", async (req, res) => {
   return res.json({ ok: true, lists });
 });
 
-app.post("/api/admin/citylist/config", async (req, res) => {
+app.post("/api/admin/directory/config", async (req, res) => {
   const auth = await resolveAdminAuth(req);
   if (!auth.isPortalAdmin) return res.status(403).json({ error: "forbidden" });
+  const kind = String(req.body?.kind || "");
+  if (!DIRECTORY_KINDS.has(kind)) return res.status(400).json({ error: "invalid_kind" });
+  const { typeKey, idKey } = directorySettingKeys(kind);
   return res.json({
     ok: true,
-    iblockTypeId: getSetting(db, auth.memberId, CITY_LIST_IBLOCK_TYPE_KEY),
-    iblockId: getSetting(db, auth.memberId, CITY_LIST_IBLOCK_ID_KEY),
-    entries: listCityDirectory(db, auth.memberId),
+    iblockTypeId: getSetting(db, auth.memberId, typeKey),
+    iblockId: getSetting(db, auth.memberId, idKey),
+    entries: listDirectory(db, auth.memberId, kind as "city" | "direction"),
   });
 });
 
-// Pulls every element from the chosen "Списки" iblock into our local city_directory mirror.
-app.post("/api/admin/citylist/sync", async (req, res) => {
+// Pulls every element from the chosen "Списки" iblock into our local directory mirror.
+app.post("/api/admin/directory/sync", async (req, res) => {
   const auth = await resolveAdminAuth(req);
   if (!auth.isPortalAdmin) return res.status(403).json({ error: "forbidden" });
   if (!auth.domain || !auth.accessToken) return res.status(400).json({ error: "missing_access_token" });
+  const kind = String(req.body?.kind || "");
+  if (!DIRECTORY_KINDS.has(kind)) return res.status(400).json({ error: "invalid_kind" });
   const iblockTypeId = String(req.body?.iblockTypeId || "");
   const iblockId = String(req.body?.iblockId || "");
   if (!iblockTypeId || !iblockId) return res.status(400).json({ error: "missing_iblock" });
@@ -494,13 +501,15 @@ app.post("/api/admin/citylist/sync", async (req, res) => {
     iblockTypeId,
     iblockId,
   });
-  replaceCityDirectory(
+  replaceDirectory(
     db,
     auth.memberId,
+    kind as "city" | "direction",
     elements.map((e, i) => ({ externalId: e.ID, name: e.NAME, sort: Number(e.SORT || i) })),
   );
-  setSetting(db, auth.memberId, CITY_LIST_IBLOCK_TYPE_KEY, iblockTypeId);
-  setSetting(db, auth.memberId, CITY_LIST_IBLOCK_ID_KEY, iblockId);
+  const { typeKey, idKey } = directorySettingKeys(kind);
+  setSetting(db, auth.memberId, typeKey, iblockTypeId);
+  setSetting(db, auth.memberId, idKey, iblockId);
   return res.json({ ok: true, count: elements.length });
 });
 

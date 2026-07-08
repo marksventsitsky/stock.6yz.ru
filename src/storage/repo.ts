@@ -245,23 +245,24 @@ export function setSetting(db: Db, memberId: string, key: string, value: string)
   ).run(memberId, key, value, now);
 }
 
-export type CityDirectoryEntry = { externalId: string; name: string; sort: number };
+export type DirectoryKind = "city" | "direction";
+export type DirectoryEntry = { externalId: string; name: string; sort: number };
 
-export function listCityDirectory(db: Db, memberId: string): CityDirectoryEntry[] {
+export function listDirectory(db: Db, memberId: string, kind: DirectoryKind): DirectoryEntry[] {
   const rows = db
-    .prepare(`SELECT external_id, name, sort FROM city_directory WHERE member_id = ? ORDER BY sort ASC, name ASC`)
-    .all(memberId) as Array<{ external_id: string; name: string; sort: number }>;
+    .prepare(`SELECT external_id, name, sort FROM list_directory WHERE member_id = ? AND kind = ? ORDER BY sort ASC, name ASC`)
+    .all(memberId, kind) as Array<{ external_id: string; name: string; sort: number }>;
   return rows.map((r) => ({ externalId: r.external_id, name: r.name, sort: r.sort }));
 }
 
-export function replaceCityDirectory(db: Db, memberId: string, entries: CityDirectoryEntry[]) {
+export function replaceDirectory(db: Db, memberId: string, kind: DirectoryKind, entries: DirectoryEntry[]) {
   const now = Date.now();
   const tx = db.transaction(() => {
-    db.prepare(`DELETE FROM city_directory WHERE member_id = ?`).run(memberId);
+    db.prepare(`DELETE FROM list_directory WHERE member_id = ? AND kind = ?`).run(memberId, kind);
     const insert = db.prepare(
-      `INSERT INTO city_directory (member_id, external_id, name, sort, updated_at_ms) VALUES (?, ?, ?, ?, ?)`,
+      `INSERT INTO list_directory (member_id, kind, external_id, name, sort, updated_at_ms) VALUES (?, ?, ?, ?, ?, ?)`,
     );
-    for (const e of entries) insert.run(memberId, e.externalId, e.name, e.sort, now);
+    for (const e of entries) insert.run(memberId, kind, e.externalId, e.name, e.sort, now);
   });
   tx();
 }
