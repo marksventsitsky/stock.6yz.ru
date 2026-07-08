@@ -109,6 +109,27 @@ app.all("/b24/userfield/promo", (req, res) => {
   );
 });
 
+// Install handler: Bitrix24 POSTs here right after "Установить" on the local-app form.
+// Captures the portal's member_id/domain/tokens, then tells Bitrix the install is done.
+app.post("/b24/install", (req, res) => {
+  const merged = { ...req.query, ...req.body } as Record<string, unknown>;
+  captureAuthFromRequest(merged);
+
+  res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.send(`<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"/>
+<script src="//api.bitrix24.com/api/v1/dev/"></script>
+</head><body style="font:14px sans-serif;padding:16px;">
+<div id="msg">Устанавливаем…</div>
+<script>
+  BX24.init(function () {
+    BX24.installFinish();
+    document.getElementById("msg").textContent = "Готово. Можно закрыть это окно.";
+  });
+</script>
+</body></html>`);
+});
+
 // Placement/menu handler for the marketing admin panel (list/edit/delete the promo catalog).
 app.all("/b24/admin", (req, res) => {
   const merged = { ...req.query, ...req.body } as Record<string, unknown>;
