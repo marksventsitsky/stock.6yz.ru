@@ -1,5 +1,5 @@
 import type { Db } from "../storage/db.js";
-import { callB24 } from "./rest.js";
+import { callB24, callB24Webhook } from "./rest.js";
 import { syncEnumField } from "./enumSync.js";
 import type { Promotion } from "../domain/promo.js";
 
@@ -30,21 +30,27 @@ function placementBindMethod(): string {
  * We deliberately don't use a custom USERFIELD_TYPE widget: registering a brand-new field
  * TYPE (`userfieldtype.add`) needs a higher-privilege scope than plain field/placement
  * registration and was rejected (`insufficient_scope`) on this portal even with `crm`+`user`.
+ *
+ * `placement` itself isn't a selectable scope for local apps on this portal either — only
+ * incoming webhooks can be granted it — so this call goes through a webhook when configured
+ * (falls back to the app's own OAuth token otherwise, in case some portal does allow it).
  */
 async function ensurePlacement(
   db: Db,
-  params: { domain: string; memberId: string; accessToken: string; placement: string; handlerUrl: string },
+  params: { domain: string; memberId: string; accessToken: string; placement: string; handlerUrl: string; webhookUrl?: string },
 ) {
+  const body = {
+    PLACEMENT: params.placement,
+    HANDLER: params.handlerUrl,
+    TITLE: "Акции",
+  };
+  if (params.webhookUrl) return callB24Webhook<unknown>(params.webhookUrl, placementBindMethod(), body);
   return callB24<unknown>(db, {
     domain: params.domain,
     memberId: params.memberId,
     accessToken: params.accessToken,
     method: placementBindMethod(),
-    body: {
-      PLACEMENT: params.placement,
-      HANDLER: params.handlerUrl,
-      TITLE: "Акции",
-    },
+    body,
   });
 }
 
@@ -83,6 +89,7 @@ export async function setupPromoFields(
     cities: string[];
     brands: string[];
     types: string[];
+    webhookUrl?: string;
   },
 ): Promise<{ ok: true } | { ok: false; error: string; errorDescription?: string }> {
   const handlerUrl = `${params.publicBaseUrl.replace(/\/+$/, "")}/b24/promo-tab`;
@@ -93,6 +100,7 @@ export async function setupPromoFields(
     accessToken: params.accessToken,
     placement: "CRM_DEAL_DETAIL_TAB",
     handlerUrl,
+    webhookUrl: params.webhookUrl,
   });
   if (!isDuplicateOk(dealTab)) return dealTab;
 

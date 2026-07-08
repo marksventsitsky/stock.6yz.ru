@@ -36,6 +36,9 @@ const DB_PATH = process.env.DB_PATH || "data.sqlite";
 const API_BASE_URL = process.env.PUBLIC_BASE_URL || `http://localhost:${PORT}`;
 const SETUP_SECRET = process.env.SETUP_SECRET || "";
 const ADMIN_SECRET = process.env.ADMIN_SECRET || "";
+// Incoming webhook (Разработчикам → Другое → Входящий вебхук) with rights this portal won't
+// grant a local app: placement, lists. Optional — only needed for placement.bind/lists.*.
+const B24_WEBHOOK_URL = process.env.B24_WEBHOOK_URL || "";
 
 const FIELD_CODES: FieldCodes = {
   jsonField: process.env.PROMO_JSON_FIELD || "UF_CRM_PROMO_JSON",
@@ -467,7 +470,12 @@ app.post("/api/admin/directory/discover", async (req, res) => {
   const auth = await resolveAdminAuth(req);
   if (!auth.isPortalAdmin) return res.status(403).json({ error: "forbidden" });
   if (!auth.domain || !auth.accessToken) return res.status(400).json({ error: "missing_access_token" });
-  const lists = await discoverLists(db, { domain: auth.domain, memberId: auth.memberId, accessToken: auth.accessToken });
+  const lists = await discoverLists(db, {
+    domain: auth.domain,
+    memberId: auth.memberId,
+    accessToken: auth.accessToken,
+    webhookUrl: B24_WEBHOOK_URL || undefined,
+  });
   return res.json({ ok: true, lists });
 });
 
@@ -542,6 +550,7 @@ app.post("/api/admin/directory/sync", async (req, res) => {
     domain: auth.domain,
     memberId: auth.memberId,
     accessToken: auth.accessToken,
+    webhookUrl: B24_WEBHOOK_URL || undefined,
     iblockTypeId,
     iblockId,
   });
@@ -588,6 +597,7 @@ app.post("/api/b24/setup", async (req, res) => {
       cities: facets.cities,
       brands: facets.brands,
       types: facets.types,
+      webhookUrl: B24_WEBHOOK_URL || undefined,
     });
     if (!result.ok) return res.status(400).json({ error: result.error, errorDescription: result.errorDescription });
     return res.json({ ok: true });

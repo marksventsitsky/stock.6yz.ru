@@ -164,6 +164,53 @@ export async function callB24<T>(
   return { ok: false, error: data.error, errorDescription: data.error_description };
 }
 
+/**
+ * Some methods (placement.bind, lists.*) need a scope that this portal's local-app scope
+ * picker simply doesn't offer ("placement" only shows up for incoming webhooks here, not
+ * OAuth apps). An incoming webhook carries the creating admin's actual rights with no scope
+ * negotiation, so we route just those calls through one if B24_WEBHOOK_URL is configured.
+ */
+export async function callB24Webhook<T>(
+  webhookUrl: string,
+  method: string,
+  body: Record<string, unknown>,
+): Promise<B24CallResult<T>> {
+  const base = webhookUrl.replace(/\/+$/, "");
+  const url = `${base}/${method}.json`;
+  let attempt: Response | null = null;
+  let lastErr: unknown = null;
+  for (let i = 0; i < 6; i++) {
+    try {
+      attempt = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(120_000),
+      });
+      lastErr = null;
+      break;
+    } catch (e: unknown) {
+      lastErr = e;
+      if (!isConnectTimeout(e)) break;
+      await sleep(250 * Math.pow(2, i));
+    }
+  }
+  if (!attempt) {
+    const msg = describeError(lastErr);
+    console.error("[b24] webhook_fetch_failed", { url, method, error: msg });
+    return { ok: false, error: "fetch_failed", errorDescription: msg };
+  }
+  let data: B24Response<T>;
+  try {
+    data = (await attempt.json()) as B24Response<T>;
+  } catch (e: unknown) {
+    const msg = e instanceof Error ? e.message : String(e);
+    return { ok: false, error: "invalid_json", errorDescription: msg };
+  }
+  if (!isErr(data)) return { ok: true, result: data.result };
+  return { ok: false, error: data.error, errorDescription: data.error_description };
+}
+
 async function refreshAccessToken(
   db: Db,
   memberId: string,
