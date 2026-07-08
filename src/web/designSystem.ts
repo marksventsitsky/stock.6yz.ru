@@ -80,6 +80,14 @@ export const DESIGN_SYSTEM_CSS = `
   .ds-btn-plain:hover:not(:disabled) { border-color: var(--text-muted); color: var(--text); }
   .ds-btn-text { background: none; border: none; color: var(--text-secondary); text-decoration: underline; padding: 6px 4px; }
   .ds-btn-danger-text { background: none; border: none; color: var(--danger-text); padding: 6px 4px; cursor: pointer; }
+
+  /* Compact icon button for dense table row actions */
+  .ds-icon-btn {
+    display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+    border: 1px solid transparent; border-radius: 6px; background: none; color: var(--text-secondary); cursor: pointer;
+  }
+  .ds-icon-btn:hover { background: var(--accent-bg); color: var(--accent); border-color: var(--accent-bg); }
+  .ds-icon-btn svg { width: 15px; height: 15px; display: block; }
   .ds-btn-badge { padding: 1px 6px; border-radius: 8px; background: var(--warning); font-size: 11px; color: #fff; }
 
   /* Chips */

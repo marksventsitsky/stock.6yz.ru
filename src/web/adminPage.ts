@@ -475,7 +475,7 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
                       <th style="width:150px">Города</th>
                       <th style="width:120px">С</th>
                       <th style="width:120px">По</th>
-                      <th style="width:150px"></th>
+                      <th style="width:78px"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -518,8 +518,12 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
               <td><input type="date" class="ds-input-quiet" data-act="edit-date-start" data-key="\${escapeHtml(key)}" value="\${escapeHtml(r.periodStart || "")}"/></td>
               <td><input type="date" class="ds-input-quiet" data-act="edit-date-end" data-key="\${escapeHtml(key)}" value="\${escapeHtml(r.periodEnd || "")}"/></td>
               <td style="text-align:right;white-space:nowrap">
-                <span data-act="duplicate-row" data-key="\${escapeHtml(key)}" style="font-size:12px;color:var(--text-secondary);cursor:pointer;margin-right:10px" title="Создать новую акцию на основе этой">Копировать</span>
-                <span data-act="open-drawer" data-key="\${escapeHtml(key)}" style="font-size:12px;color:var(--accent);cursor:pointer">Открыть</span>
+                <button type="button" class="ds-icon-btn" data-act="duplicate-row" data-key="\${escapeHtml(key)}" title="Дублировать акцию">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </button>
+                <button type="button" class="ds-icon-btn" data-act="open-drawer" data-key="\${escapeHtml(key)}" title="Редактировать акцию">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                </button>
               </td>
             </tr>\`;
         }
