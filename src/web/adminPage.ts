@@ -26,7 +26,9 @@ export function renderAdminPage(ctx: AdminPageContext, apiBaseUrl: string): stri
     <style>
       ${DESIGN_SYSTEM_CSS}
       body { margin: 0; }
-      .wrap { max-width: 1600px; margin: 0 auto; padding: 20px; }
+      /* Bitrix24 already wraps app pages in its own padded card — don't add a second
+         layer of max-width/centering on top of it, or you get huge dead gutters. */
+      .wrap { width: 100%; box-sizing: border-box; }
       .toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); flex-wrap: wrap; }
       .split { display: flex; align-items: stretch; }
       .table-scroll { flex: 1; min-width: 0; max-height: 70vh; overflow: auto; }
