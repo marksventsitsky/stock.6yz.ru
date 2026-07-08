@@ -284,8 +284,17 @@ app.post("/api/b24/save-selection", async (req, res) => {
         },
       },
     });
-    if (!r.ok) return res.status(400).json({ error: r.error, errorDescription: r.errorDescription });
+    if (!r.ok) {
+      console.error("[save-selection] update_failed", {
+        entity: body.entityType,
+        id: body.entityId,
+        error: r.error,
+        desc: r.errorDescription,
+      });
+      return res.status(400).json({ error: r.error, errorDescription: r.errorDescription });
+    }
 
+    console.log("[save-selection] ok", { entity: body.entityType, id: body.entityId, count: body.selection.length });
     return res.json({ ok: true });
   } catch (e: unknown) {
     const msg = e instanceof Error ? e.message : "bad_request";

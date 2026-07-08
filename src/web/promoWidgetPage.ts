@@ -141,12 +141,20 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
             title: promo.title, selectedAt: new Date().toISOString(),
           }]);
           draftPromoId = "";
-          setFieldValue();
+          persist();
           render();
         }
-        function removeSelected(idx) { selection = selection.filter((_, i) => i !== idx); setFieldValue(); render(); }
+        function removeSelected(idx) { selection = selection.filter((_, i) => i !== idx); persist(); render(); }
 
         let saving = false;
+
+        // Persist on every change. setValue keeps the field in sync inside the (possibly unsaved)
+        // card; for an existing deal we ALSO write to CRM immediately via the API, because relying
+        // on the card-save to flush setValue proved unreliable on this portal (it saved "[]").
+        function persist() {
+          setFieldValue();
+          if (entityId) saveToCrm();
+        }
 
         async function saveToCrm() {
           if (!entityId || !BOOTSTRAP.apiBaseUrl) return;
@@ -164,7 +172,7 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
             const data = await resp.json();
             if (!resp.ok) throw new Error((data && data.error) || "save_failed");
             saving = false;
-            setStatus("ok", "Сохранено: JSON-снапшот и стандартные поля обновлены");
+            setStatus("ok", "Сохранено");
           } catch (e) {
             saving = false;
             setStatus("error", "Ошибка сохранения: " + (e && e.message ? e.message : String(e)));
@@ -226,8 +234,9 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
 
           const saveBarHtml = canEdit ? \`
             <div style="display:flex;align-items:center;gap:12px">
-              <button id="saveBtn" type="button" class="ds-btn ds-btn-primary" \${saving ? "disabled" : ""}>\${saving ? "Сохранение…" : "Записать в поля для аналитики"}</button>
-              <span style="font-size:11px;color:var(--text-muted)">Сам выбор сохранится при сохранении сделки; кнопка сразу заполняет поля направление/бренд/тип/акция для фильтров.</span>
+              \${entityId
+                ? '<span style="font-size:11px;color:var(--text-muted)">Изменения сохраняются автоматически.</span>'
+                : '<span style="font-size:11px;color:var(--text-muted)">Сохранится вместе со сделкой после первого сохранения.</span>'}
               \${statusHtml}
             </div>\` : statusHtml;
 
@@ -245,8 +254,6 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
           if (promoSel) promoSel.addEventListener("change", (e) => { draftPromoId = e.target.value; render(); });
           const addBtn = document.getElementById("addBtn");
           if (addBtn) addBtn.addEventListener("click", addSelected);
-          const saveBtn = document.getElementById("saveBtn");
-          if (saveBtn) saveBtn.addEventListener("click", saveToCrm);
           appEl.querySelectorAll("button[data-act='remove']").forEach((el) => {
             el.addEventListener("click", (e) => removeSelected(Number(e.currentTarget.getAttribute("data-idx"))));
           });
