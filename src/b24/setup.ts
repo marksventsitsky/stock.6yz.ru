@@ -1,5 +1,5 @@
 import type { Db } from "../storage/db.js";
-import { callB24, callB24Webhook } from "./rest.js";
+import { callB24 } from "./rest.js";
 import { syncEnumField } from "./enumSync.js";
 import type { Promotion } from "../domain/promo.js";
 
@@ -13,6 +13,8 @@ export type FieldCodes = {
   nameField: string;
 };
 
+const USER_TYPE_ID = "promo_selector";
+
 const DUPLICATE_ERRORS = new Set(["ERROR_FIELD_NAME", "ERROR_DUPLICATE", "ERROR_USER_TYPE_ID"]);
 
 function isDuplicateOk(res: { ok: true } | { ok: false; error: string; errorDescription?: string }): boolean {
@@ -21,36 +23,28 @@ function isDuplicateOk(res: { ok: true } | { ok: false; error: string; errorDesc
   return String(res.errorDescription ?? "").toLowerCase().includes("already binded");
 }
 
-function placementBindMethod(): string {
-  return "placement.bind";
-}
-
 /**
- * Shows the promo picker as a tab on the deal/lead detail card (`placement.bind`).
- * We deliberately don't use a custom USERFIELD_TYPE widget: registering a brand-new field
- * TYPE (`userfieldtype.add`) needs a higher-privilege scope than plain field/placement
- * registration and was rejected (`insufficient_scope`) on this portal even with `crm`+`user`.
- *
- * `placement` itself isn't a selectable scope for local apps on this portal either — only
- * incoming webhooks can be granted it — so this call goes through a webhook when configured
- * (falls back to the app's own OAuth token otherwise, in case some portal does allow it).
+ * Registers the custom user-field TYPE that renders the promo picker inline on the deal card
+ * (like "График рассрочки" in installment_plans_and_payments). Needs the `placement` scope —
+ * with only `crm`+`user` this call returns `insufficient_scope` (that's why an earlier version
+ * fell back to a detail-tab placement). Now that the app has `placement`, we use the proper
+ * embedded field so it lives inside the main card, not as a separate top tab.
  */
-async function ensurePlacement(
+async function ensureUserFieldType(
   db: Db,
-  params: { domain: string; memberId: string; accessToken: string; placement: string; handlerUrl: string; webhookUrl?: string },
+  params: { domain: string; memberId: string; accessToken: string; handlerUrl: string },
 ) {
-  const body = {
-    PLACEMENT: params.placement,
-    HANDLER: params.handlerUrl,
-    TITLE: "Акции",
-  };
-  if (params.webhookUrl) return callB24Webhook<unknown>(params.webhookUrl, placementBindMethod(), body);
   return callB24<unknown>(db, {
     domain: params.domain,
     memberId: params.memberId,
     accessToken: params.accessToken,
-    method: placementBindMethod(),
-    body,
+    method: "userfieldtype.add",
+    body: {
+      USER_TYPE_ID,
+      HANDLER: params.handlerUrl,
+      TITLE: "Выбор акции",
+      DESCRIPTION: "Виджет выбора акций (направление → тип → акция)",
+    },
   });
 }
 
@@ -89,20 +83,18 @@ export async function setupPromoFields(
     cities: string[];
     brands: string[];
     types: string[];
-    webhookUrl?: string;
   },
 ): Promise<{ ok: true } | { ok: false; error: string; errorDescription?: string }> {
-  const handlerUrl = `${params.publicBaseUrl.replace(/\/+$/, "")}/b24/promo-tab`;
+  const handlerUrl = `${params.publicBaseUrl.replace(/\/+$/, "")}/b24/userfield/promo`;
 
-  const dealTab = await ensurePlacement(db, {
+  // Register the custom field type that renders the embedded picker on the card.
+  const addType = await ensureUserFieldType(db, {
     domain: params.domain,
     memberId: params.memberId,
     accessToken: params.accessToken,
-    placement: "CRM_DEAL_DETAIL_TAB",
     handlerUrl,
-    webhookUrl: params.webhookUrl,
   });
-  if (!isDuplicateOk(dealTab)) return dealTab;
+  if (!isDuplicateOk(addType)) return addType;
 
   // Bitrix uses the same UF_CRM_ namespace for every CRM entity, so one set of short field
   // names produces identical field codes on both the deal and the lead.
@@ -115,22 +107,22 @@ export async function setupPromoFields(
 
   // Only deals for now (sales pipeline "Продажи", category 0) — leads aren't wired up yet.
   for (const entity of ["deal"] as const) {
-    // 1) Plain (non-custom-type) string field: stores the full JSON snapshot for audit/history.
-    //    Edited only through our own "Акции" tab (placement above), not inline on the card.
+    // 1) The embedded picker field: a custom-type (promo_selector) field that renders our widget
+    //    inline on the card and stores the full JSON snapshot as its value.
     const jsonRes = await ensureField(db, {
       domain: params.domain,
       memberId: params.memberId,
       accessToken: params.accessToken,
       entity,
       fields: {
-        USER_TYPE_ID: "string",
+        USER_TYPE_ID,
         FIELD_NAME: shortJsonName,
         XML_ID: shortJsonName,
         MANDATORY: "N",
         SHOW_IN_LIST: "N",
         EDIT_IN_LIST: "N",
-        EDIT_FORM_LABEL: "Выбор акции (JSON)",
-        LIST_COLUMN_LABEL: "Выбор акции (JSON)",
+        EDIT_FORM_LABEL: "Акции",
+        LIST_COLUMN_LABEL: "Акции",
         SETTINGS: {},
       },
     });

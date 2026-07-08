@@ -21,7 +21,7 @@ import {
   upsertPromotion,
   upsertSelection,
 } from "./storage/repo.js";
-import { PromotionSchema, SelectionSchema, promoIsActiveToday, selectionToJson } from "./domain/promo.js";
+import { PromotionSchema, SelectionSchema, parseSelectionJson, promoIsActiveToday, selectionToJson } from "./domain/promo.js";
 import { renderPromoWidgetPage } from "./web/promoWidgetPage.js";
 import { renderAdminPage } from "./web/adminPage.js";
 import { setupPromoFields, catalogFacets, type FieldCodes } from "./b24/setup.js";
@@ -72,7 +72,7 @@ app.get("/", async (req, res) => {
       "",
       "Health: /health",
       "Dev preview: /dev/field-preview",
-      "Promo tab handler: /b24/promo-tab",
+      "Userfield handler: /b24/userfield/promo",
       "Admin panel: /b24/admin",
       "Setup: POST /api/b24/setup",
     ].join("\n"),
@@ -103,42 +103,23 @@ function parsePlacementOptions(req: express.Request): Record<string, unknown> {
   return {};
 }
 
-const RESTRICTED_PIPELINE_HTML = `<!doctype html>
-<html lang="ru"><body style="font:14px sans-serif;padding:16px;color:#6b7280;">
-Вкладка «Акции» пока доступна только для сделок в воронке «Продажи».
-</body></html>`;
-
-// Bitrix24 CRM_DEAL_DETAIL_TAB placement handler: the "Акции" tab.
-// Deals only for now, and only within the "Продажи" pipeline (CATEGORY_ID 0).
-app.all("/b24/promo-tab", async (req, res) => {
+// Bitrix24 USERFIELD_TYPE handler: renders the embedded promo picker inline on the deal card.
+// The field value (JSON selection) arrives in PLACEMENT_OPTIONS.VALUE; entity id/type/mode too.
+app.all("/b24/userfield/promo", (req, res) => {
   const merged = { ...req.query, ...req.body } as Record<string, unknown>;
   const { domain, memberId, authId, refreshId } = captureAuthFromRequest(merged);
   const lang = String(merged.LANG ?? "ru");
-  const placement = String(merged.PLACEMENT ?? "CRM_DEAL_DETAIL_TAB");
-  const entityType: "DEAL" | "LEAD" = placement.includes("LEAD") ? "LEAD" : "DEAL";
 
   const placementOptions = parsePlacementOptions(req);
-  const entityId =
-    Number(placementOptions.ID ?? placementOptions.ENTITY_VALUE_ID ?? placementOptions.ENTITY_ID ?? 0) || 0;
-
-  if (entityType === "DEAL" && entityId && domain && authId) {
-    const dealRes = await callB24<{ CATEGORY_ID?: string }>(db, {
-      domain,
-      memberId,
-      accessToken: authId,
-      method: "crm.deal.get",
-      body: { id: entityId },
-    });
-    const categoryId = dealRes.ok ? Number(dealRes.result.CATEGORY_ID ?? 0) : 0;
-    if (categoryId !== 0) {
-      res.setHeader("Content-Type", "text/html; charset=utf-8");
-      return res.send(RESTRICTED_PIPELINE_HTML);
-    }
-  }
+  const entityIdRaw = String(placementOptions.ENTITY_ID ?? "");
+  const entityType: "DEAL" | "LEAD" = entityIdRaw.includes("LEAD") ? "LEAD" : "DEAL";
+  const entityId = Number(placementOptions.ENTITY_VALUE_ID ?? 0) || 0;
+  const mode = String(placementOptions.MODE ?? "edit");
+  const value = typeof placementOptions.VALUE === "string" ? placementOptions.VALUE : "";
+  const initialSelection = parseSelectionJson(value);
 
   const today = new Date().toISOString().slice(0, 10);
   const catalog = listPromotions(db).filter((p) => promoIsActiveToday(p, today));
-  const initialSelection = memberId && entityId ? (getSelection(db, memberId, entityType, entityId) ?? []) : [];
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(
@@ -146,6 +127,7 @@ app.all("/b24/promo-tab", async (req, res) => {
       {
         domain,
         lang,
+        mode,
         entityType,
         entityId,
         authId,
@@ -193,13 +175,19 @@ app.all("/b24/admin", (req, res) => {
 app.get("/dev/field-preview", (req, res) => {
   const entityType = String(req.query.entityType || "DEAL") === "LEAD" ? "LEAD" : "DEAL";
   const entityId = Number(req.query.entityId || 123);
+  const mode = String(req.query.mode || "edit");
+  const value = typeof req.query.value === "string" ? req.query.value : "[]";
 
-  const placement = entityType === "LEAD" ? "CRM_LEAD_DETAIL_TAB" : "CRM_DEAL_DETAIL_TAB";
-  const placementOptions = { ID: entityId };
+  const placementOptions = {
+    MODE: mode,
+    ENTITY_ID: entityType === "LEAD" ? "CRM_LEAD" : "CRM_DEAL",
+    ENTITY_VALUE_ID: entityId,
+    VALUE: value,
+  };
   const q = new URLSearchParams({
     DOMAIN: "dev.local",
     LANG: "ru",
-    PLACEMENT: placement,
+    PLACEMENT: "USERFIELD_TYPE",
     AUTH_ID: "dev-token",
     member_id: "dev-member",
     PLACEMENT_OPTIONS: JSON.stringify(placementOptions),
@@ -207,11 +195,11 @@ app.get("/dev/field-preview", (req, res) => {
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(`<!doctype html>
 <html lang="ru"><head><meta charset="utf-8"/><title>Dev preview</title>
-<style>body{font:14px sans-serif;margin:16px;}iframe{width:100%;height:750px;border:1px solid #e5e7eb;border-radius:10px;}</style>
+<style>body{font:14px sans-serif;margin:16px;}iframe{width:100%;height:600px;border:1px solid #e5e7eb;border-radius:10px;}</style>
 </head><body>
-<h2>Предпросмотр вкладки «Акции»</h2>
-<div class="muted">entityType=${entityType}, entityId=${entityId}</div>
-<iframe src="/b24/promo-tab?${q.toString()}"></iframe>
+<h2>Предпросмотр поля «Акции»</h2>
+<div class="muted">entityType=${entityType}, entityId=${entityId}, mode=${mode}</div>
+<iframe src="/b24/userfield/promo?${q.toString()}"></iframe>
 </body></html>`);
 });
 
@@ -597,7 +585,6 @@ app.post("/api/b24/setup", async (req, res) => {
       cities: facets.cities,
       brands: facets.brands,
       types: facets.types,
-      webhookUrl: B24_WEBHOOK_URL || undefined,
     });
     if (!result.ok) return res.status(400).json({ error: result.error, errorDescription: result.errorDescription });
     return res.json({ ok: true });

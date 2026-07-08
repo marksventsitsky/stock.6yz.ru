@@ -5,6 +5,7 @@ import { DESIGN_SYSTEM_CSS } from "./designSystem.js";
 export type PromoWidgetContext = {
   domain: string;
   lang: string;
+  mode: string; // "edit" | "view"
   entityType: "DEAL" | "LEAD";
   entityId: number;
   authId: string;
@@ -30,6 +31,7 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
     apiBaseUrl,
     domain: ctx.domain,
     lang: ctx.lang,
+    mode: ctx.mode,
     memberId: ctx.memberId,
     authId: ctx.authId,
     entityType: ctx.entityType,
@@ -47,12 +49,12 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
     <script src="//api.bitrix24.com/api/v1/dev/"></script>
     <style>
       ${DESIGN_SYSTEM_CSS}
-      body { margin: 0; }
-      .wrap { padding: 14px; max-width: 720px; }
+      body { margin: 0; background: transparent; }
+      .wrap { padding: 8px 2px; }
       .bar { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
       .promo-card { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; }
       .promo-card + .promo-card { border-top: 1px solid #eef1f3; }
-      .grid3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+      .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
     </style>
   </head>
   <body>
@@ -83,6 +85,19 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
         const TODAY = BOOTSTRAP.today;
         const entityType = BOOTSTRAP.entityType;
         const entityId = BOOTSTRAP.entityId;
+        const MODE = BOOTSTRAP.mode || "edit";
+        const canEdit = MODE !== "view";
+
+        // Stage the current selection JSON into the Bitrix field, so it's saved when the user
+        // saves the deal card (this is the primary persistence path for an embedded field).
+        function setFieldValue() {
+          const value = JSON.stringify(selection);
+          try {
+            if (window.BX24 && BX24.placement && BX24.placement.call) {
+              BX24.placement.call("setValue", value);
+            }
+          } catch {}
+        }
 
         function isActive(p) {
           if (!p.active) return false;
@@ -126,9 +141,10 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
             title: promo.title, selectedAt: new Date().toISOString(),
           }]);
           draftPromoId = "";
+          setFieldValue();
           render();
         }
-        function removeSelected(idx) { selection = selection.filter((_, i) => i !== idx); render(); }
+        function removeSelected(idx) { selection = selection.filter((_, i) => i !== idx); setFieldValue(); render(); }
 
         let saving = false;
 
@@ -171,7 +187,7 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
                     <span class="ds-chip ds-chip-neutral">\${escapeHtml(s.type || "—")}</span>
                   </div>
                 </div>
-                <button type="button" data-act="remove" data-idx="\${i}" class="ds-btn-danger-text">Удалить</button>
+                \${canEdit ? '<button type="button" data-act="remove" data-idx="' + i + '" class="ds-btn-danger-text">Удалить</button>' : ""}
               </div>\`).join("")
             : '<div style="padding:20px;text-align:center;color:var(--text-muted);border:1px dashed var(--border-input);border-radius:8px">Пока не выбрано ни одной акции</div>';
 
@@ -179,14 +195,7 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
             ? '<div style="margin-top:10px;font-size:12.5px;color:' + (statusKind === "error" ? "var(--danger-text)" : statusKind === "ok" ? "var(--success)" : "var(--text-secondary)") + '">' + escapeHtml(statusText) + "</div>"
             : "";
 
-          appEl.innerHTML = \`
-            <div class="bar">
-              <div class="ds-h1">Акции</div>
-              <div style="flex:1"></div>
-              <div style="font-size:11px;color:var(--text-muted)">\${entityType} #\${entityId || "—"}</div>
-            </div>
-            <div class="ds-card" style="margin-bottom:12px;overflow:hidden">\${cardsHtml}</div>
-
+          const addPanelHtml = canEdit ? \`
             <div class="ds-card" style="padding:14px;margin-bottom:12px">
               <div style="font-size:13px;font-weight:700;color:var(--text);margin-bottom:10px">Добавить акцию</div>
               <div class="grid3">
@@ -213,12 +222,19 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
                 </div>
               </div>
               <button id="addBtn" type="button" class="ds-btn ds-btn-outline" style="margin-top:10px" \${draftPromoId ? "" : "disabled"}>+ Добавить в список</button>
-            </div>
+            </div>\` : "";
 
+          const saveBarHtml = canEdit ? \`
             <div style="display:flex;align-items:center;gap:12px">
-              <button id="saveBtn" type="button" class="ds-btn ds-btn-primary" \${saving ? "disabled" : ""}>\${saving ? "Сохранение…" : "Сохранить в CRM"}</button>
+              <button id="saveBtn" type="button" class="ds-btn ds-btn-primary" \${saving ? "disabled" : ""}>\${saving ? "Сохранение…" : "Записать в поля для аналитики"}</button>
+              <span style="font-size:11px;color:var(--text-muted)">Сам выбор сохранится при сохранении сделки; кнопка сразу заполняет поля направление/бренд/тип/акция для фильтров.</span>
               \${statusHtml}
-            </div>
+            </div>\` : statusHtml;
+
+          appEl.innerHTML = \`
+            <div class="ds-card" style="margin-bottom:12px;overflow:hidden">\${cardsHtml}</div>
+            \${addPanelHtml}
+            \${saveBarHtml}
           \`;
 
           const citySel = document.getElementById("citySel");
@@ -237,6 +253,7 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
         }
 
         render();
+        setFieldValue();
       })();
     </script>
   </body>
