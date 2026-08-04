@@ -21,7 +21,7 @@ import {
   upsertPromotion,
   upsertSelection,
 } from "./storage/repo.js";
-import { PromotionSchema, SelectionSchema, parseSelectionJson, promoIsActiveToday, selectionToJson } from "./domain/promo.js";
+import { PromotionSchema, SelectionSchema, distinctCities, parseSelectionJson, promoIsActiveToday, selectionToJson } from "./domain/promo.js";
 import { renderPromoWidgetPage } from "./web/promoWidgetPage.js";
 import { renderAdminPage } from "./web/adminPage.js";
 import { setupPromoFields, catalogFacets, type FieldCodes } from "./b24/setup.js";
@@ -119,7 +119,16 @@ app.all("/b24/userfield/promo", (req, res) => {
   const initialSelection = parseSelectionJson(value);
 
   const today = new Date().toISOString().slice(0, 10);
-  const catalog = listPromotions(db).filter((p) => promoIsActiveToday(p, today));
+  const allPromos = listPromotions(db);
+  const catalog = allPromos.filter((p) => promoIsActiveToday(p, today));
+
+  // City picker must always have options even when every currently-active promo is tagged
+  // "Все города" — build it from the full catalog + the synced city directory, not just
+  // the cities that happen to appear in active promos.
+  const dirCities = listDirectory(db, memberId, "city").map((e) => e.name);
+  const cities = Array.from(new Set([...distinctCities(allPromos), ...dirCities])).sort((a, b) =>
+    a.localeCompare(b, "ru"),
+  );
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.send(
@@ -134,6 +143,7 @@ app.all("/b24/userfield/promo", (req, res) => {
         refreshId: refreshId ?? undefined,
         memberId,
         catalog,
+        cities,
         initialSelection,
       },
       API_BASE_URL,

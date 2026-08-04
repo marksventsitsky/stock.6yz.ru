@@ -12,6 +12,7 @@ export type PromoWidgetContext = {
   refreshId?: string;
   memberId: string;
   catalog: Promotion[];
+  cities: string[];
   initialSelection: Selection;
 };
 
@@ -37,6 +38,7 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
     entityType: ctx.entityType,
     entityId: ctx.entityId,
     catalog: ctx.catalog,
+    cities: ctx.cities,
     initialSelection: ctx.initialSelection,
     today: new Date().toISOString().slice(0, 10),
   });
@@ -130,6 +132,9 @@ export function renderPromoWidgetPage(ctx: PromoWidgetContext, apiBaseUrl: strin
         }
 
         function distinctCities() {
+          // Server sends the full city list (all catalog cities + synced directory), so the
+          // picker isn't empty when every active promo is tagged "Все города".
+          if (Array.isArray(BOOTSTRAP.cities) && BOOTSTRAP.cities.length) return BOOTSTRAP.cities.slice();
           const set = new Set();
           CATALOG.forEach((p) => { if (isActive(p)) p.cities.forEach((c) => { if (c !== "Все") set.add(c); }); });
           return Array.from(set).sort((a, b) => a.localeCompare(b, "ru"));
